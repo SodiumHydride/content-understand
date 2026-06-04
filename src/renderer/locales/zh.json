@@ -1,0 +1,179 @@
+{
+  "app": {
+    "name": "Content Understand",
+    "tagline": "链接与文件，变成你的笔记"
+  },
+  "modes": {
+    "capture": "收录",
+    "vault": "便签架",
+    "map": "导图",
+    "journal": "时间线"
+  },
+  "nav": {
+    "modes": "视图",
+    "library": "笔记",
+    "all": "全部",
+    "video": "视频",
+    "image": "图片",
+    "audio": "音频",
+    "article": "文章",
+    "recent": "最近",
+    "settings": "设置"
+  },
+  "language": {
+    "zh": "中文",
+    "en": "EN",
+    "switch": "界面语言"
+  },
+  "home": {
+    "prompt": "值得记下来的",
+    "hint": "粘贴链接，或拖入文件",
+    "placeholder": "粘贴链接…",
+    "understand": "理解并保存",
+    "dropHere": "松手开始",
+    "model": "理解模型",
+    "workspace": "笔记库",
+    "openVault": "在访达中打开"
+  },
+  "capture": {
+    "title": "值得记下来的",
+    "lead": "粘贴链接，或拖入文件",
+    "pipelineTitle": "正在处理",
+    "recentNotes": "刚保存",
+    "viewJournal": "查看全部",
+    "goInbox": "去收录",
+    "writeNote": "写一条",
+    "placeholder": {
+      "bilibili": "粘贴 B 站链接…",
+      "youtube": "粘贴 YouTube 链接…",
+      "article": "粘贴网页链接…"
+    }
+  },
+  "vault": {
+    "label": "便签目录",
+    "count": "共 {{count}} 条",
+    "unconfigured": "未配置笔记库路径",
+    "pageTitle": "便签墙",
+    "pageSub": "重要的笔记，贴在这里",
+    "pinnedCount": "{{count}} 张便签",
+    "emptyPinned": "还没有贴便签",
+    "emptyPinnedHint": "在预览里点「贴上便签架」，或从时间线挑重要的",
+    "goTimeline": "去时间线",
+    "shelf": {
+      "video": "视频便签",
+      "image": "图片便签",
+      "audio": "音频便签",
+      "article": "文章便签"
+    }
+  },
+  "journal": {
+    "pageTitle": "时间线",
+    "pageSub": "共 {{count}} 条，从左到右是你的积累",
+    "milestone": "{{count}} 条笔记",
+    "empty": "时间线还是空的",
+    "emptyHint": "在「收录」添加几条，完成后会按日期出现在这里",
+    "inProgress": "进行中"
+  },
+  "map": {
+    "pageTitle": "导图",
+    "mode": {
+      "thinking": "思考",
+      "wiki": "Wiki"
+    },
+    "lead": {
+      "thinking": "独立思考：拖曳笔记，或加空白便签",
+      "wiki": "全库鸟瞰：所有笔记的关系地图"
+    },
+    "addScratch": "空白便签",
+    "scratchDefault": "新想法…",
+    "empty": "导图还是空的",
+    "emptyHint": "先在「收录」添加笔记，再回来摆放"
+  },
+  "platform": {
+    "bilibili": "B 站",
+    "youtube": "YouTube",
+    "article": "网页"
+  },
+  "status": {
+    "online": "引擎在线",
+    "demo": "演示模式",
+    "onlineTitle": "Python 引擎已连接",
+    "demoTitle": "引擎未连接，使用演示数据"
+  },
+  "tasks": {
+    "running": "进行中",
+    "completed": "已完成",
+    "failed": "失败",
+    "empty": "还没有任务",
+    "stage": {
+      "resolve": "解析链接",
+      "download": "下载内容",
+      "model": "模型理解",
+      "write": "写入笔记"
+    }
+  },
+  "library": {
+    "empty": "便签架还是空的",
+    "emptyHint": "在「收录」添加几条，会按类型排在这里",
+    "search": "搜索笔记…",
+    "noMatch": "没有匹配的笔记",
+    "noMatchHint": "换个关键词试试，或清除筛选条件"
+  },
+  "preview": {
+    "empty": "选择一条笔记预览",
+    "pin": "贴上便签架",
+    "unpin": "取下便签",
+    "loading": "加载中…",
+    "close": "关闭预览",
+    "fullNote": "完整笔记",
+    "highlightSections": "摘要,要点,来源,Summary,Highlights,Source",
+    "openFolder": "在文件夹中显示",
+    "openFile": "用默认应用打开",
+    "source": "来源",
+    "tags": "标签",
+    "meta": "信息"
+  },
+  "settings": {
+    "title": "设置",
+    "general": "通用",
+    "vault": "笔记库",
+    "models": "理解模型",
+    "advanced": "高级",
+    "about": "关于",
+    "language": "界面语言",
+    "languageSystem": "跟随系统",
+    "languageZh": "中文",
+    "languageEn": "English",
+    "vaultPath": "笔记库路径",
+    "vaultPick": "选择文件夹",
+    "vaultHint": "所有 Markdown 笔记保存在此目录",
+    "vaultPathPlaceholder": "~/ContentVault",
+    "apiBase": "API Base URL",
+    "apiBasePlaceholder": "https://api.example.com/v1",
+    "apiKey": "API Key",
+    "apiKeyPlaceholder": "留空则使用环境变量",
+    "videoBackend": "视频",
+    "imageBackend": "图片",
+    "audioBackend": "音频",
+    "articleBackend": "文章",
+    "backendMimo": "MiMo API",
+    "backendOpenAI": "OpenAI 兼容",
+    "backendGemma": "Gemma API",
+    "cookiesPath": "B 站 Cookies（可选）",
+    "cacheDir": "缓存目录",
+    "cacheDirPlaceholder": "~/.content-app/cache",
+    "save": "保存",
+    "saved": "已保存",
+    "close": "关闭",
+    "rebuildIndex": "重建索引",
+    "rebuildHint": "从笔记库扫描 Markdown 重建本地索引（不影响笔记文件）",
+    "aboutText": "多模态理解 · 本地 Markdown 笔记",
+    "version": "版本"
+  },
+  "errors": {
+    "invalidUrl": "请输入有效的链接或选择文件",
+    "sidecarOffline": "引擎未连接，已使用演示数据",
+    "duplicate": "该链接已理解过",
+    "failed": "理解失败"
+  }
+}

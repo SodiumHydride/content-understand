@@ -1,0 +1,18 @@
+/**
+ * Bundled typefaces — consistent on macOS / Windows / Linux.
+ * UI: Inter + Noto Sans SC
+ * Reading & titles: Source Serif 4 + Noto Serif SC
+ */
+
+@import '@fontsource-variable/inter/wght.css';
+
+@import '@fontsource/noto-sans-sc/chinese-simplified-400.css';
+@import '@fontsource/noto-sans-sc/chinese-simplified-500.css';
+
+@import '@fontsource/noto-serif-sc/chinese-simplified-400.css';
+@import '@fontsource/noto-serif-sc/chinese-simplified-500.css';
+@import '@fontsource/noto-serif-sc/chinese-simplified-600.css';
+
+@import '@fontsource/source-serif-4/latin-400.css';
+@import '@fontsource/source-serif-4/latin-600.css';
+@import '@fontsource/source-serif-4/latin-400-italic.css';

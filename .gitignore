@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+release/
+
+# Vite / tooling cache
+.vite/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor (local only)
+.idea/
+*.swp
+*.swo
+
+# Python (sidecar / scripts)
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Local user data / demo vault
+ContentVault/

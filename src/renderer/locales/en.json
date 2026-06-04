@@ -1,0 +1,179 @@
+{
+  "app": {
+    "name": "Content Understand",
+    "tagline": "Turn links and files into everyday notes"
+  },
+  "modes": {
+    "capture": "Capture",
+    "vault": "Stickies",
+    "map": "Map",
+    "journal": "Timeline"
+  },
+  "nav": {
+    "modes": "Views",
+    "library": "Notes",
+    "all": "All",
+    "video": "Video",
+    "image": "Image",
+    "audio": "Audio",
+    "article": "Article",
+    "recent": "Recent",
+    "settings": "Settings"
+  },
+  "language": {
+    "zh": "中文",
+    "en": "EN",
+    "switch": "Language"
+  },
+  "home": {
+    "prompt": "Save what matters",
+    "hint": "Paste a link, or drop a file",
+    "placeholder": "Paste a link…",
+    "understand": "Save as note",
+    "dropHere": "Drop to start",
+    "model": "Model",
+    "workspace": "Notes",
+    "openVault": "Open folder"
+  },
+  "capture": {
+    "title": "Save what matters",
+    "lead": "Paste a link, or drop a file",
+    "pipelineTitle": "Working on it",
+    "recentNotes": "Recently saved",
+    "viewJournal": "See all",
+    "goInbox": "Go to Capture",
+    "writeNote": "Write a note",
+    "placeholder": {
+      "bilibili": "Paste a Bilibili URL…",
+      "youtube": "Paste a YouTube URL…",
+      "article": "Paste a web URL…"
+    }
+  },
+  "vault": {
+    "label": "Notes folder",
+    "count": "{{count}} notes",
+    "unconfigured": "Notes folder not set",
+    "pageTitle": "Sticky wall",
+    "pageSub": "Notes you marked as important",
+    "pinnedCount": "{{count}} stickies",
+    "emptyPinned": "No stickies yet",
+    "emptyPinnedHint": "Pin from preview, or pick from the timeline",
+    "goTimeline": "Open timeline",
+    "shelf": {
+      "video": "Video notes",
+      "image": "Image notes",
+      "audio": "Audio notes",
+      "article": "Article notes"
+    }
+  },
+  "journal": {
+    "pageTitle": "Timeline",
+    "pageSub": "{{count}} notes · your trail grows left to right",
+    "milestone": "{{count}} notes",
+    "empty": "Your timeline is empty",
+    "emptyHint": "Add a link in Capture — finished notes land here by day",
+    "inProgress": "In progress"
+  },
+  "map": {
+    "pageTitle": "Map",
+    "mode": {
+      "thinking": "Thinking",
+      "wiki": "Wiki"
+    },
+    "lead": {
+      "thinking": "Your desk — drag notes, add blank stickies",
+      "wiki": "Bird's-eye view of the whole library"
+    },
+    "addScratch": "Blank sticky",
+    "scratchDefault": "New idea…",
+    "empty": "Map is empty",
+    "emptyHint": "Add notes in Capture, then arrange them here"
+  },
+  "platform": {
+    "bilibili": "Bilibili",
+    "youtube": "YouTube",
+    "article": "Web"
+  },
+  "status": {
+    "online": "Online",
+    "demo": "Demo mode",
+    "onlineTitle": "Python engine connected",
+    "demoTitle": "Engine offline — demo data"
+  },
+  "tasks": {
+    "running": "In progress",
+    "completed": "Completed",
+    "failed": "Failed",
+    "empty": "No tasks yet",
+    "stage": {
+      "resolve": "Resolving",
+      "download": "Downloading",
+      "model": "Understanding",
+      "write": "Writing note"
+    }
+  },
+  "library": {
+    "empty": "Your shelf is empty",
+    "emptyHint": "Save a few in Capture — they appear here by type",
+    "search": "Search notes…",
+    "noMatch": "No matching notes",
+    "noMatchHint": "Try another keyword or clear filters"
+  },
+  "preview": {
+    "pin": "Pin to wall",
+    "unpin": "Unpin",
+    "empty": "Select a note to preview",
+    "loading": "Loading…",
+    "close": "Close preview",
+    "fullNote": "Full note",
+    "highlightSections": "Summary,Highlights,Source,摘要,要点,来源",
+    "openFolder": "Reveal in folder",
+    "openFile": "Open with default app",
+    "source": "Source",
+    "tags": "Tags",
+    "meta": "Details"
+  },
+  "settings": {
+    "title": "Settings",
+    "general": "General",
+    "vault": "Notes folder",
+    "models": "Models",
+    "advanced": "Advanced",
+    "about": "About",
+    "language": "Language",
+    "languageSystem": "System",
+    "languageZh": "中文",
+    "languageEn": "English",
+    "vaultPath": "Notes folder path",
+    "vaultPick": "Choose folder",
+    "vaultHint": "All Markdown notes are stored here",
+    "vaultPathPlaceholder": "~/ContentVault",
+    "apiBase": "API Base URL",
+    "apiBasePlaceholder": "https://api.example.com/v1",
+    "apiKey": "API Key",
+    "apiKeyPlaceholder": "Leave empty to use environment variables",
+    "videoBackend": "Video",
+    "imageBackend": "Image",
+    "audioBackend": "Audio",
+    "articleBackend": "Article",
+    "backendMimo": "MiMo API",
+    "backendOpenAI": "OpenAI compatible",
+    "backendGemma": "Gemma API",
+    "cookiesPath": "Bilibili cookies (optional)",
+    "cacheDir": "Cache directory",
+    "cacheDirPlaceholder": "~/.content-app/cache",
+    "save": "Save",
+    "saved": "Saved",
+    "close": "Close",
+    "rebuildIndex": "Rebuild index",
+    "rebuildHint": "Rescan the notes folder and rebuild the local index (notes are untouched)",
+    "aboutText": "Multimodal understanding · local Markdown everyday notes",
+    "version": "Version"
+  },
+  "errors": {
+    "invalidUrl": "Enter a valid URL or choose a file",
+    "sidecarOffline": "Engine offline — showing demo data",
+    "duplicate": "This URL was already understood",
+    "failed": "Understanding failed"
+  }
+}
