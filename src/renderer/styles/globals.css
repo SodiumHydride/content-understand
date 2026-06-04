@@ -1640,13 +1640,72 @@ html[data-locale='en'] {
   min-height: 0;
 }
 
+.view-header-vault {
+  position: relative;
+  z-index: 4;
+}
+
 .vault-board-scroll {
+  position: relative;
   flex: 1;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   background:
     radial-gradient(circle at 20% 18%, rgb(255 252 249 / 55%) 0%, transparent 42%),
     radial-gradient(circle at 82% 76%, rgb(232 220 200 / 35%) 0%, transparent 38%),
     linear-gradient(165deg, #e9dcc8 0%, #dfd0b8 48%, #d8c9ae 100%);
+  box-shadow: inset 0 0 0 1px rgb(160 130 95 / 18%);
+}
+
+.vault-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.vault-canvas::before,
+.vault-canvas::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Soft edge — hints the board wraps, not infinite scroll */
+.vault-canvas::before {
+  inset: 0;
+  box-shadow:
+    inset 0 14px 24px -12px rgb(28 25 23 / 12%),
+    inset 0 -14px 24px -12px rgb(28 25 23 / 10%),
+    inset 14px 0 24px -12px rgb(28 25 23 / 8%),
+    inset -14px 0 24px -12px rgb(28 25 23 / 8%);
+}
+
+.vault-canvas::after {
+  inset: 10px;
+  border: 1px dashed rgb(160 130 95 / 22%);
+  border-radius: 2px;
+}
+
+.vault-empty-hint {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 14rem;
+  color: var(--color-ink-500);
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.vault-empty-hint p {
+  margin: 0;
+  font-size: var(--text-caption);
+  line-height: 1.55;
 }
 
 .vault-board {
@@ -1660,7 +1719,8 @@ html[data-locale='en'] {
 }
 
 .sticky-note {
-  position: relative;
+  position: absolute;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   width: 11.25rem;
@@ -1675,23 +1735,65 @@ html[data-locale='en'] {
     2px 5px 14px rgb(28 25 23 / 10%);
   transform: rotate(var(--stick-rot, 0deg));
   transition:
-    transform var(--duration) var(--ease-out),
-    box-shadow var(--duration) var(--ease-out);
-  cursor: pointer;
+    left 340ms var(--ease-out),
+    top 340ms var(--ease-out),
+    transform 180ms var(--ease-out),
+    box-shadow 180ms var(--ease-out);
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+  will-change: left, top, transform;
 }
 
-.sticky-note:hover {
-  transform: rotate(0deg) translateY(-3px);
+.sticky-note-grabbable {
+  cursor: grab;
+}
+
+.sticky-note-grabbable:active {
+  cursor: grabbing;
+}
+
+.sticky-note-dragging {
+  z-index: 6;
+  transition:
+    transform 120ms var(--ease-out),
+    box-shadow 180ms var(--ease-out);
+}
+
+.sticky-note-wrap {
+  z-index: 1;
+}
+
+.sticky-note-instant {
+  transition: none !important;
+}
+
+.sticky-note:hover:not(.sticky-note-dragging):not(.sticky-note-editing) {
+  transform: rotate(var(--stick-rot, 0deg)) translateY(-3px);
   box-shadow:
     1px 2px 0 rgb(28 25 23 / 5%),
     4px 12px 22px rgb(28 25 23 / 14%);
 }
 
 .sticky-note-selected {
-  transform: rotate(0deg) translateY(-4px);
+  z-index: 2;
+  transform: rotate(var(--stick-rot, 0deg)) translateY(-4px);
   box-shadow:
-    0 0 0 2px rgb(106 158 196 / 35%),
+    0 0 0 1px rgb(28 25 23 / 8%),
     4px 14px 24px rgb(28 25 23 / 16%);
+}
+
+.sticky-note-editing {
+  z-index: 3;
+  transform: rotate(0deg) translateY(-5px) scale(1.02);
+  min-height: 10.5rem;
+  box-shadow:
+    0 0 0 2px rgb(106 158 196 / 28%),
+    6px 18px 32px rgb(28 25 23 / 18%);
+}
+
+.sticky-note-editing:hover {
+  transform: rotate(0deg) translateY(-5px) scale(1.02);
 }
 
 .sticky-note-pin {
@@ -1704,6 +1806,29 @@ html[data-locale='en'] {
   background: var(--stick-accent, var(--color-accent));
   box-shadow: 0 1px 2px rgb(28 25 23 / 25%);
   transform: translateX(-50%);
+}
+
+.sticky-note-input {
+  flex: 1;
+  width: 100%;
+  min-height: 6.5rem;
+  margin-top: var(--space-2);
+  padding: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-caption);
+  line-height: 1.55;
+  letter-spacing: var(--type-page-tracking);
+  color: var(--color-ink-900);
+  resize: none;
+  border: none;
+  background: transparent;
+  outline: none;
+  cursor: text;
+  user-select: text;
+}
+
+.sticky-note-input::placeholder {
+  color: var(--color-ink-500);
 }
 
 .sticky-note-title {
@@ -1736,6 +1861,102 @@ html[data-locale='en'] {
   padding-top: var(--space-3);
   font-size: 0.625rem;
   font-weight: 500;
+  color: var(--color-ink-500);
+}
+
+/* ─── Context menu (macOS-style secondary actions) ─── */
+.context-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 11.5rem;
+  max-width: 16rem;
+  padding: 0.35rem;
+  border-radius: 0.55rem;
+  border: 1px solid rgb(28 25 23 / 10%);
+  background: rgb(255 252 249 / 92%);
+  backdrop-filter: blur(14px) saturate(1.35);
+  box-shadow:
+    0 0 0 0.5px rgb(255 255 255 / 65%) inset,
+    0 8px 28px rgb(28 25 23 / 14%);
+}
+
+.animate-context-menu {
+  animation: context-menu-in 140ms var(--ease-out) both;
+}
+
+@keyframes context-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+  padding: 0.38rem 0.55rem;
+  font-size: var(--text-caption);
+  font-weight: 450;
+  line-height: 1.35;
+  color: var(--color-ink-900);
+  text-align: left;
+  border: none;
+  border-radius: 0.35rem;
+  background: transparent;
+  cursor: default;
+  transition: background 80ms ease;
+}
+
+.context-menu-item:hover:not(:disabled) {
+  background: rgb(106 158 196 / 14%);
+}
+
+.context-menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.context-menu-item-danger {
+  color: var(--color-danger);
+}
+
+.context-menu-item-danger:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+}
+
+.context-menu-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu-shortcut {
+  flex-shrink: 0;
+  font-size: var(--text-micro);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--color-ink-500);
+}
+
+.context-menu-sep {
+  height: 1px;
+  margin: 0.3rem 0.45rem;
+  background: var(--divider-strong);
+}
+
+.context-menu-label {
+  padding: 0.28rem 0.55rem 0.15rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--color-ink-500);
 }
 

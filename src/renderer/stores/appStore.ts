@@ -139,6 +139,7 @@ interface AppState {
   inputUrl: string
   isDragging: boolean
   pinnedSlugs: string[]
+  vaultLayout: Record<string, MapNodePos>
   mapMode: MapMode
   thinkingMap: Record<string, MapNodePos>
   wikiMap: Record<string, MapNodePos>
@@ -158,7 +159,14 @@ interface AppState {
   setLibrary: (items: LibraryItem[]) => void
   togglePin: (slug: string) => void
   isPinned: (slug: string) => boolean
-  createNote: () => void
+  pinNote: (slug: string, pos?: MapNodePos) => void
+  createNote: (opts?: {
+    pin?: boolean
+    viewMode?: ViewMode
+    pos?: MapNodePos
+  }) => string
+  updateNote: (slug: string, patch: Partial<Pick<LibraryItem, 'title' | 'body' | 'summary'>>) => void
+  setVaultNodePos: (slug: string, pos: MapNodePos) => void
   setMapNodePos: (map: MapMode, id: string, pos: MapNodePos) => void
   addScratchNode: (text: string) => void
   updateScratchNode: (id: string, patch: Partial<ScratchNode>) => void
@@ -183,6 +191,7 @@ export const useAppStore = create<AppState>()(
       inputUrl: '',
       isDragging: false,
       pinnedSlugs: ['video/demo-welcome', 'article/demo-read'],
+      vaultLayout: {},
       mapMode: 'thinking',
       thinkingMap: {},
       wikiMap: {},
@@ -221,7 +230,17 @@ export const useAppStore = create<AppState>()(
           }
         }),
       isPinned: (slug) => get().pinnedSlugs.includes(slug),
-      createNote: () => {
+      pinNote: (slug, pos) =>
+        set((s) => {
+          const already = s.pinnedSlugs.includes(slug)
+          const pinnedSlugs = already ? s.pinnedSlugs : [...s.pinnedSlugs, slug]
+          const vaultLayout =
+            pos && !already
+              ? { ...s.vaultLayout, [slug]: pos }
+              : s.vaultLayout
+          return { pinnedSlugs, vaultLayout, selectedSlug: slug, viewMode: 'vault' }
+        }),
+      createNote: (opts) => {
         const lng = getEffectiveLocale(get().settings.locale)
         const now = new Date().toISOString()
         const id = Date.now()
@@ -229,22 +248,40 @@ export const useAppStore = create<AppState>()(
         const item: LibraryItem = {
           slug,
           path: `notes/note-${id}.md`,
-          title: lng === 'zh' ? '无标题笔记' : 'Untitled note',
+          title: lng === 'zh' ? '无标题便签' : 'Untitled sticky',
           type: 'article',
           platform: 'self',
           url: '',
-          summary: lng === 'zh' ? '从这里开始写。' : 'Start writing here.',
+          summary: '',
           tags: lng === 'zh' ? ['笔记'] : ['note'],
           created: now,
           updated: now,
-          body: lng === 'zh' ? '# 无标题笔记\n\n' : '# Untitled note\n\n'
+          body: ''
         }
+        const pin = opts?.pin ?? false
+        const viewMode = opts?.viewMode ?? 'journal'
         set((s) => ({
           library: [item, ...s.library],
           selectedSlug: slug,
-          viewMode: 'journal'
+          viewMode,
+          pinnedSlugs: pin ? [...s.pinnedSlugs, slug] : s.pinnedSlugs,
+          vaultLayout:
+            pin && opts?.pos
+              ? { ...s.vaultLayout, [slug]: opts.pos }
+              : s.vaultLayout
         }))
+        return slug
       },
+      updateNote: (slug, patch) =>
+        set((s) => ({
+          library: s.library.map((item) =>
+            item.slug === slug
+              ? { ...item, ...patch, updated: new Date().toISOString() }
+              : item
+          )
+        })),
+      setVaultNodePos: (slug, pos) =>
+        set((s) => ({ vaultLayout: { ...s.vaultLayout, [slug]: pos } })),
       setMapNodePos: (map, id, pos) =>
         set((s) =>
           map === 'thinking'
@@ -346,6 +383,7 @@ export const useAppStore = create<AppState>()(
         settings: s.settings,
         viewMode: s.viewMode,
         pinnedSlugs: s.pinnedSlugs,
+        vaultLayout: s.vaultLayout,
         mapMode: s.mapMode,
         thinkingMap: s.thinkingMap,
         wikiMap: s.wikiMap,
