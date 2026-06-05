@@ -15,6 +15,7 @@ import {
   startRuntimeSetup,
   fetchDownloadedModels,
   deleteModel,
+  exportCookies,
   type RuntimeRecommend,
   type RuntimePreset,
   type DownloadedModel
@@ -419,13 +420,11 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {tab === 'advanced' && (
               <div className="space-y-4">
-                <Field label={t('settings.cookiesPath')}>
-                  <input
-                    value={settings.cookiesPath}
-                    onChange={(e) => updateSettings({ cookiesPath: e.target.value })}
-                    className="settings-input"
-                  />
-                </Field>
+                <CookiesSection
+                  cookiesPath={settings.cookiesPath}
+                  onPathChange={(p) => updateSettings({ cookiesPath: p })}
+                  isZh={isZh}
+                />
                 <Field label={t('settings.cacheDir')}>
                   <input
                     readOnly
@@ -588,6 +587,92 @@ function ModelManager({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function CookiesSection({
+  cookiesPath,
+  onPathChange,
+  isZh
+}: {
+  cookiesPath: string
+  onPathChange: (p: string) => void
+  isZh: boolean
+}): React.JSX.Element {
+  const { t } = useTranslation()
+  const [exporting, setExporting] = React.useState(false)
+  const [exportResult, setExportResult] = React.useState<string | null>(null)
+
+  const handleExport = async (browser: string): Promise<void> => {
+    setExporting(true)
+    setExportResult(null)
+    const result = await exportCookies(browser)
+    if (result.ok && result.path) {
+      onPathChange(result.path)
+      setExportResult(isZh ? '导出成功' : 'Exported successfully')
+    } else {
+      setExportResult(result.error || (isZh ? '导出失败' : 'Export failed'))
+    }
+    setExporting(false)
+  }
+
+  return (
+    <div className="space-y-3">
+      <Field label={t('settings.cookiesPath')}>
+        <input
+          value={cookiesPath}
+          onChange={(e) => onPathChange(e.target.value)}
+          placeholder={isZh ? 'Bilibili cookies 文件路径' : 'Bilibili cookies file path'}
+          className="settings-input text-[12px]"
+          style={{ fontFamily: 'var(--font-mono)' }}
+        />
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="settings-btn-secondary"
+          disabled={exporting}
+          onClick={() => void handleExport('chrome')}
+        >
+          {exporting
+            ? (isZh ? '导出中...' : 'Exporting...')
+            : (isZh ? '从 Chrome 导出' : 'Export from Chrome')}
+        </button>
+        <button
+          type="button"
+          className="settings-btn-secondary"
+          disabled={exporting}
+          onClick={() => void handleExport('safari')}
+        >
+          {exporting
+            ? (isZh ? '导出中...' : 'Exporting...')
+            : (isZh ? '从 Safari 导出' : 'Export from Safari')}
+        </button>
+        <button
+          type="button"
+          className="settings-btn-secondary"
+          disabled={exporting}
+          onClick={() => void handleExport('firefox')}
+        >
+          {exporting
+            ? (isZh ? '导出中...' : 'Exporting...')
+            : (isZh ? '从 Firefox 导出' : 'Export from Firefox')}
+        </button>
+      </div>
+      {exportResult && (
+        <p className={clsx(
+          'text-[11px]',
+          exportResult.includes('成功') || exportResult.includes('success') ? 'text-[var(--color-accent)]' : 'text-[var(--color-danger)]'
+        )}>
+          {exportResult}
+        </p>
+      )}
+      <p className="text-[10px] text-ink-500">
+        {isZh
+          ? '需要在对应浏览器中登录 B 站。Cookies 仅保存在本地。'
+          : 'Must be logged into Bilibili in the browser. Cookies are stored locally only.'}
+      </p>
     </div>
   )
 }

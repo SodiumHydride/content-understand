@@ -440,6 +440,44 @@ def delete_model(filename: str):
     return {"deleted": filename, "size_bytes": size}
 
 
+class CookiesExportPayload(BaseModel):
+    browser: str = "chrome"
+
+
+@app.post("/v1/cookies/export")
+def export_cookies(body: CookiesExportPayload):
+    """Export cookies from browser using yt-dlp. Saves to app data dir."""
+    import subprocess
+
+    from engine.paths import app_data_root
+
+    dest = app_data_root() / "bilibili-cookies.txt"
+    try:
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "yt_dlp",
+                "--cookies-from-browser", body.browser,
+                "--cookies", str(dest),
+                "https://www.bilibili.com",
+                "--skip-download",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return {"ok": False, "error": result.stderr.strip()[:500]}
+        if not dest.exists():
+            return {"ok": False, "error": "Cookies file was not created"}
+        return {"ok": True, "path": str(dest), "size": dest.stat().st_size}
+    except FileNotFoundError:
+        return {"ok": False, "error": "yt-dlp not found. Install with: pip install yt-dlp"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "Export timed out (30s)"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:500]}
+
+
 @app.get("/v1/library")
 def library(include_body: bool = False):
     """List all pages. Pass ?include_body=true to include full markdown body."""

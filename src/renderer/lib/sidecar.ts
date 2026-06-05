@@ -312,3 +312,27 @@ export async function deleteModel(filename: string): Promise<boolean> {
     return false
   }
 }
+
+// ── Cookies export ──
+
+export interface CookiesExportResult {
+  ok: boolean
+  path?: string
+  size?: number
+  error?: string
+}
+
+export async function exportCookies(browser: string): Promise<CookiesExportResult> {
+  const base = await getBase()
+  if (!base) return { ok: false, error: 'Sidecar offline' }
+  try {
+    const r = await fetch(`${base}/v1/cookies/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ browser })
+    })
+    return (await r.json()) as CookiesExportResult
+  } catch {
+    return { ok: false, error: 'Request failed' }
+  }
+}
