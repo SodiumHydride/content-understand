@@ -3,7 +3,8 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { HardDrive, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
-import type { BackendId } from '../stores/types'
+import type { ProviderId } from '../stores/types'
+import { PROVIDER_PRESETS } from '../stores/types'
 import type { AppLocale } from '../lib/i18n'
 import { useEffect, useState } from 'react'
 import {
@@ -20,19 +21,12 @@ import {
 } from '../lib/sidecar'
 import type { InferenceMode } from '../stores/types'
 import { Select, type SelectOption } from './Select'
+import { ProviderCard } from './ProviderCard'
+import { ModalityRouter } from './ModalityRouter'
 
 type SettingsTab = 'general' | 'vault' | 'models' | 'advanced' | 'about'
 
 const tabs: SettingsTab[] = ['general', 'vault', 'models', 'advanced', 'about']
-
-const backends: BackendId[] = ['openai_compat', 'local_server', 'mimo', 'gemini', 'claude']
-
-const modalityFields = [
-  ['videoBackend', 'videoModel', 'settings.videoBackend'],
-  ['imageBackend', 'imageModel', 'settings.imageBackend'],
-  ['audioBackend', 'audioModel', 'settings.audioBackend'],
-  ['articleBackend', 'articleModel', 'settings.articleBackend']
-] as const
 
 const TIER_LABELS: Record<string, { zh: string; en: string }> = {
   ultra_lite: { zh: '极轻量', en: 'Ultra Lite' },
@@ -55,6 +49,8 @@ export function SettingsModal(): React.JSX.Element | null {
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const settings = useAppStore((s) => s.settings)
   const updateSettings = useAppStore((s) => s.updateSettings)
+  const updateProvider = useAppStore((s) => s.updateProvider)
+  const setModalityRoute = useAppStore((s) => s.setModalityRoute)
   const applyLocale = useAppStore((s) => s.applyLocale)
   const pushEngineConfig = useAppStore((s) => s.pushEngineConfig)
   const refreshLibrary = useAppStore((s) => s.refreshLibrary)
@@ -90,19 +86,6 @@ export function SettingsModal(): React.JSX.Element | null {
     setSavedFlash(true)
     setTimeout(() => setSavedFlash(false), 1600)
   }
-
-  const backendLabel = (id: BackendId): string => {
-    if (id === 'mimo') return t('settings.backendMimo')
-    if (id === 'gemini') return t('settings.backendGemini')
-    if (id === 'claude') return t('settings.backendClaude')
-    if (id === 'local_server') return t('settings.backendLocal')
-    return t('settings.backendOpenAI')
-  }
-
-  const backendOptions: SelectOption[] = backends.map((b) => ({
-    value: b,
-    label: backendLabel(b)
-  }))
 
   const localeOptions: SelectOption[] = [
     { value: 'system', label: t('settings.languageSystem') },
@@ -156,6 +139,9 @@ export function SettingsModal(): React.JSX.Element | null {
     save()
     setSettingsOpen(false)
   }
+
+  // Ordered provider list for display
+  const providerOrder: string[] = ['mimo', 'gemini', 'claude', 'openai_compat', 'local_server']
 
   return (
     <div className="settings-overlay fixed inset-0 z-50 flex items-center justify-center p-6">
@@ -256,8 +242,6 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {tab === 'models' && (
               <div className="space-y-5">
-                <p className="text-xs leading-relaxed text-ink-600">{t('settings.modelsHint')}</p>
-
                 {/* ── Inference mode ── */}
                 <Field label={t('settings.inferenceMode')}>
                   <Select
@@ -267,131 +251,95 @@ export function SettingsModal(): React.JSX.Element | null {
                   />
                 </Field>
 
-                {/* ── Hardware info ── */}
-                {runtimeRec && (
-                  <div className="rounded-lg border border-[var(--divider)] bg-paper-deep/40 p-3 text-[11px] leading-relaxed text-ink-700">
-                    <pre className="whitespace-pre-wrap font-sans">
-                      {isZh ? runtimeRec.summary_zh : runtimeRec.summary_en}
-                    </pre>
-                    <p className="mt-2 text-ink-600">
-                      {t('settings.runtimeState')}: {runtimeState || 'idle'}
-                    </p>
-                  </div>
-                )}
-
-                {/* ── Preset selector (grouped by tier) ── */}
-                {presetOptions.length > 0 && (
-                  <Field label={t('settings.localPreset')}>
-                    <Select
-                      value={effectivePresetId}
-                      options={presetOptions}
-                      onChange={(v) => updateSettings({ localPresetId: v })}
-                      compact
-                    />
-                  </Field>
-                )}
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="settings-btn-secondary"
-                    onClick={async () => {
-                      updateSettings({ localEngineConfirmed: true })
-                      const pid = settings.localPresetId || runtimeRec?.recommended_preset_id || null
-                      await startRuntimeSetup(pid, settings.useOllamaIfAvailable)
-                      save()
-                    }}
-                  >
-                    {t('settings.prepareLocalEngine')}
-                  </button>
-                </div>
-
-                <label className="flex items-center gap-2 text-xs text-ink-700">
-                  <input
-                    type="checkbox"
-                    checked={settings.useOllamaIfAvailable}
-                    onChange={(e) => updateSettings({ useOllamaIfAvailable: e.target.checked })}
-                  />
-                  {t('settings.useOllamaIfAvailable')}
-                </label>
-                <label className="flex items-center gap-2 text-xs text-ink-700">
-                  <input
-                    type="checkbox"
-                    checked={settings.autoStartLocal}
-                    onChange={(e) => updateSettings({ autoStartLocal: e.target.checked })}
-                  />
-                  {t('settings.autoStartLocal')}
-                </label>
-
-                {/* ── API credentials ── */}
-                <Field label={t('settings.apiBase')}>
-                  <input
-                    value={settings.apiBase}
-                    onChange={(e) => updateSettings({ apiBase: e.target.value })}
-                    placeholder={t('settings.apiBasePlaceholder')}
-                    className="settings-input"
-                  />
-                </Field>
-                <Field label={t('settings.apiKey')}>
-                  <input
-                    type="password"
-                    value={settings.apiKey}
-                    onChange={(e) => updateSettings({ apiKey: e.target.value })}
-                    placeholder={t('settings.apiKeyPlaceholder')}
-                    className="settings-input"
-                  />
-                </Field>
-                <Field label={t('settings.mimoKeys')}>
-                  <input
-                    type="password"
-                    value={settings.mimoKeys}
-                    onChange={(e) => updateSettings({ mimoKeys: e.target.value })}
-                    placeholder={t('settings.mimoKeysPlaceholder')}
-                    className="settings-input text-[12px]"
-                    style={{ fontFamily: 'var(--font-mono)' }}
-                  />
-                </Field>
-                <Field label={t('settings.geminiKeys')}>
-                  <input
-                    type="password"
-                    value={settings.geminiKeys}
-                    onChange={(e) => updateSettings({ geminiKeys: e.target.value })}
-                    placeholder={t('settings.geminiKeysPlaceholder')}
-                    className="settings-input text-[12px]"
-                    style={{ fontFamily: 'var(--font-mono)' }}
-                  />
-                </Field>
-
-                {/* ── Per-modality backend config ── */}
-                {modalityFields.map(([backendKey, modelKey, labelKey]) => (
-                  <div key={backendKey} className="space-y-2 rounded-lg border border-[var(--divider)] p-3">
-                    <Field label={t(labelKey)}>
+                {/* ── Local inference ── */}
+                <Section title={isZh ? '本地推理' : 'Local Inference'}>
+                  {runtimeRec && (
+                    <div className="rounded-lg border border-[var(--divider)] bg-paper-deep/40 p-3 text-[11px] leading-relaxed text-ink-700">
+                      <pre className="whitespace-pre-wrap font-sans">
+                        {isZh ? runtimeRec.summary_zh : runtimeRec.summary_en}
+                      </pre>
+                      <p className="mt-2 text-ink-600">
+                        {t('settings.runtimeState')}: {runtimeState || 'idle'}
+                      </p>
+                    </div>
+                  )}
+                  {presetOptions.length > 0 && (
+                    <Field label={t('settings.localPreset')}>
                       <Select
-                        value={settings[backendKey]}
-                        options={backendOptions}
-                        onChange={(v) => updateSettings({ [backendKey]: v as BackendId })}
+                        value={effectivePresetId}
+                        options={presetOptions}
+                        onChange={(v) => updateSettings({ localPresetId: v })}
+                        compact
                       />
                     </Field>
-                    <Field label={t('settings.modelName')}>
-                      <input
-                        value={settings[modelKey]}
-                        onChange={(e) => updateSettings({ [modelKey]: e.target.value })}
-                        placeholder={t('settings.modelNamePlaceholder')}
-                        className="settings-input text-[12px]"
-                        style={{ fontFamily: 'var(--font-mono)' }}
-                      />
-                    </Field>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="settings-btn-secondary"
+                      onClick={async () => {
+                        const pid = settings.localPresetId || runtimeRec?.recommended_preset_id || null
+                        await startRuntimeSetup(pid, settings.useOllamaIfAvailable)
+                        save()
+                      }}
+                    >
+                      {t('settings.prepareLocalEngine')}
+                    </button>
                   </div>
-                ))}
+                  <label className="flex items-center gap-2 text-xs text-ink-700">
+                    <input
+                      type="checkbox"
+                      checked={settings.useOllamaIfAvailable}
+                      onChange={(e) => updateSettings({ useOllamaIfAvailable: e.target.checked })}
+                    />
+                    {t('settings.useOllamaIfAvailable')}
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-ink-700">
+                    <input
+                      type="checkbox"
+                      checked={settings.autoStartLocal}
+                      onChange={(e) => updateSettings({ autoStartLocal: e.target.checked })}
+                    />
+                    {t('settings.autoStartLocal')}
+                  </label>
 
-                {/* ── Downloaded models manager ── */}
-                <ModelManager
-                  models={downloaded}
-                  totalSize={totalSize}
-                  deleting={deleting}
-                  onDelete={handleDeleteModel}
-                  isZh={isZh}
-                />
+                  {/* Downloaded models */}
+                  <ModelManager
+                    models={downloaded}
+                    totalSize={totalSize}
+                    deleting={deleting}
+                    onDelete={handleDeleteModel}
+                    isZh={isZh}
+                  />
+                </Section>
+
+                {/* ── Cloud Providers ── */}
+                <Section title={isZh ? '云端 Provider' : 'Cloud Providers'}>
+                  {providerOrder.map((pid) => {
+                    const provider = settings.providers[pid]
+                    if (!provider) return null
+                    return (
+                      <ProviderCard
+                        key={pid}
+                        provider={provider}
+                        onChange={(patch) => updateProvider(pid, patch)}
+                        isZh={isZh}
+                      />
+                    )
+                  })}
+                </Section>
+
+                {/* ── Modality Router ── */}
+                <Section title={isZh ? '模态路由' : 'Modality Router'}>
+                  <ModalityRouter
+                    providers={settings.providers}
+                    defaultProvider={settings.defaultProvider}
+                    overrides={settings.modalityOverrides}
+                    onDefaultChange={(pid) => updateSettings({ defaultProvider: pid })}
+                    onOverrideChange={(modality, route) => setModalityRoute(modality, route)}
+                    isZh={isZh}
+                  />
+                </Section>
               </div>
             )}
 
@@ -420,16 +368,6 @@ export function SettingsModal(): React.JSX.Element | null {
                     style={{ fontFamily: 'var(--font-mono)' }}
                   />
                 </Field>
-                <Field label={t('settings.huggingFaceModelId')}>
-                  <input
-                    value={settings.huggingFaceModelId}
-                    onChange={(e) => updateSettings({ huggingFaceModelId: e.target.value })}
-                    placeholder={t('settings.huggingFacePlaceholder')}
-                    className="settings-input"
-                    disabled
-                  />
-                </Field>
-                <p className="text-[11px] text-ink-600">{t('settings.huggingFaceSoon')}</p>
               </div>
             )}
 
@@ -485,6 +423,21 @@ function Field({
   )
 }
 
+function Section({
+  title,
+  children
+}: {
+  title: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="space-y-3">
+      <h3 className="text-[13px] font-semibold text-ink-800">{title}</h3>
+      <div className="space-y-3">{children}</div>
+    </div>
+  )
+}
+
 function ModelManager({
   models,
   totalSize,
@@ -500,7 +453,6 @@ function ModelManager({
 }): React.JSX.Element {
   const { t } = useTranslation()
 
-  // Separate main models from mmproj files
   const mainModels = models?.filter((m) => !m.is_mmproj) ?? []
   const mmprojFiles = models?.filter((m) => m.is_mmproj) ?? []
 

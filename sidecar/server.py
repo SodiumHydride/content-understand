@@ -267,6 +267,44 @@ def runtime_version():
     }
 
 
+@app.get("/v1/providers/models")
+def provider_models(provider: str, base_url: str = "", api_key: str = ""):
+    """Fetch available models from a provider's API."""
+    if provider == "mimo":
+        if not base_url:
+            base_url = "https://api.xiaomimimo.com/v1"
+        return {"models": _fetch_openai_models(base_url, api_key)}
+    if provider == "gemini":
+        return {"models": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"]}
+    if provider == "claude":
+        return {"models": ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-8"]}
+    if provider == "openai_compat":
+        if not base_url:
+            return {"models": []}
+        return {"models": _fetch_openai_models(base_url, api_key)}
+    if provider == "local_server":
+        from engine.runtime.presets import list_presets
+        return {"models": [p["id"] for p in list_presets()]}
+    return {"models": []}
+
+
+def _fetch_openai_models(base_url: str, api_key: str) -> list[str]:
+    """Fetch model list from an OpenAI-compatible /v1/models endpoint."""
+    import requests
+
+    try:
+        base = base_url.rstrip("/")
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        r = requests.get(f"{base}/models", headers=headers, timeout=10)
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        models = data.get("data", [])
+        return sorted([m["id"] for m in models if "id" in m])
+    except Exception:
+        return []
+
+
 @app.post("/v1/runtime/stop")
 def runtime_stop():
     get_runtime_manager().stop()

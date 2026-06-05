@@ -125,6 +125,25 @@ export async function pushConfig(settings: AppSettings): Promise<boolean> {
   }
 }
 
+/** Fetch available models from a provider's API. */
+export async function fetchProviderModels(
+  providerId: string,
+  baseUrl: string,
+  apiKey: string
+): Promise<string[] | null> {
+  const base = await getBase()
+  if (!base) return null
+  try {
+    const params = new URLSearchParams({ provider: providerId, base_url: baseUrl, api_key: apiKey })
+    const r = await fetch(`${base}/v1/providers/models?${params}`)
+    if (!r.ok) return null
+    const data = (await r.json()) as { models: string[] }
+    return data.models ?? null
+  } catch {
+    return null
+  }
+}
+
 export interface RuntimeRecommend {
   hardware: Record<string, unknown>
   recommended_preset_id: string

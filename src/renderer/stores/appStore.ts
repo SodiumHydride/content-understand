@@ -6,38 +6,145 @@ import type {
   LibraryItem,
   MapMode,
   MapNodePos,
+  ModalityRoute,
+  ProviderConfig,
+  ProviderId,
   ScratchNode,
   UnderstandTask,
   ViewMode
 } from './types'
+import { DEFAULT_MODALITY_ROUTE, PROVIDER_PRESETS } from './types'
 import { getEffectiveLocale } from '../lib/i18n'
 import i18n from '../lib/i18n'
 import { syncDocumentLocale } from '../lib/localeUi'
+
+const CONTENT_TYPES = ['video', 'image', 'audio', 'article'] as const
+
+function makeDefaultProviders(): Record<string, ProviderConfig> {
+  const providers: Record<string, ProviderConfig> = {}
+  for (const [id, preset] of Object.entries(PROVIDER_PRESETS)) {
+    providers[id] = {
+      id: id as ProviderId,
+      enabled: false,
+      baseUrl: preset.baseUrl,
+      apiKeys: '',
+      models: [...preset.defaultModels],
+      selectedModel: preset.defaultModels[0] ?? ''
+    }
+  }
+  // Enable openai_compat by default as the generic fallback
+  providers.openai_compat.enabled = true
+  return providers
+}
+
+function makeDefaultModalityOverrides(): AppSettings['modalityOverrides'] {
+  return {
+    video: { ...DEFAULT_MODALITY_ROUTE },
+    image: { ...DEFAULT_MODALITY_ROUTE },
+    audio: { ...DEFAULT_MODALITY_ROUTE },
+    article: { ...DEFAULT_MODALITY_ROUTE }
+  }
+}
 
 const defaultSettings: AppSettings = {
   locale: 'system',
   vaultPath: '',
   cacheDir: '',
   modelsDir: '',
-  apiBase: '',
-  apiKey: '',
-  mimoKeys: '',
-  geminiKeys: '',
-  videoBackend: 'openai_compat',
-  imageBackend: 'openai_compat',
-  audioBackend: 'openai_compat',
-  articleBackend: 'openai_compat',
-  videoModel: '',
-  imageModel: '',
-  audioModel: '',
-  articleModel: '',
-  cookiesPath: '',
-  huggingFaceModelId: '',
+  providers: makeDefaultProviders(),
+  defaultProvider: 'openai_compat',
+  modalityOverrides: makeDefaultModalityOverrides(),
   inferenceMode: 'prefer_api',
   localPresetId: '',
   useOllamaIfAvailable: true,
-  localEngineConfirmed: false,
-  autoStartLocal: true
+  autoStartLocal: true,
+  cookiesPath: ''
+}
+
+/** Migrate old flat settings to new provider-based format. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function migrateSettings(old: any): AppSettings {
+  if (old.providers) return old as AppSettings // already new format
+
+  const providers = makeDefaultProviders()
+
+  // Migrate apiKey/apiBase → openai_compat
+  if (old.apiBase || old.apiKey) {
+    providers.openai_compat = {
+      ...providers.openai_compat,
+      enabled: true,
+      baseUrl: old.apiBase || '',
+      apiKeys: old.apiKey || ''
+    }
+  }
+
+  // Migrate mimoKeys → mimo
+  if (old.mimoKeys) {
+    providers.mimo = {
+      ...providers.mimo,
+      enabled: true,
+      apiKeys: old.mimoKeys
+    }
+  }
+
+  // Migrate geminiKeys → gemini
+  if (old.geminiKeys) {
+    providers.gemini = {
+      ...providers.gemini,
+      enabled: true,
+      apiKeys: old.geminiKeys
+    }
+  }
+
+  // Migrate per-modality backend+model → modalityOverrides
+  const overrides = makeDefaultModalityOverrides()
+  for (const ct of CONTENT_TYPES) {
+    const backendKey = `${ct}Backend`
+    const modelKey = `${ct}Model`
+    const backend = old[backendKey]
+    const model = old[modelKey]
+    if (backend && backend !== 'openai_compat') {
+      overrides[ct as keyof typeof overrides] = {
+        providerId: backend as ProviderId,
+        model: model || ''
+      }
+    } else if (model) {
+      overrides[ct as keyof typeof overrides] = {
+        providerId: 'openai_compat',
+        model
+      }
+    }
+  }
+
+  // Determine defaultProvider from the most common backend
+  const backendCounts = new Map<string, number>()
+  for (const ct of CONTENT_TYPES) {
+    const b = old[`${ct}Backend`] || 'openai_compat'
+    backendCounts.set(b, (backendCounts.get(b) || 0) + 1)
+  }
+  let defaultProvider: ProviderId = 'openai_compat'
+  let maxCount = 0
+  for (const [b, count] of backendCounts) {
+    if (count > maxCount) {
+      maxCount = count
+      defaultProvider = b as ProviderId
+    }
+  }
+
+  return {
+    locale: old.locale || 'system',
+    vaultPath: old.vaultPath || '',
+    cacheDir: old.cacheDir || '',
+    modelsDir: old.modelsDir || '',
+    providers,
+    defaultProvider,
+    modalityOverrides: overrides,
+    inferenceMode: old.inferenceMode || 'prefer_api',
+    localPresetId: old.localPresetId || '',
+    useOllamaIfAvailable: old.useOllamaIfAvailable ?? true,
+    autoStartLocal: old.autoStartLocal ?? true,
+    cookiesPath: old.cookiesPath || ''
+  }
 }
 
 const demoSlug = 'video/demo-welcome'
@@ -163,6 +270,8 @@ interface AppState {
   setViewMode: (mode: ViewMode) => void
   setMapMode: (mode: MapMode) => void
   updateSettings: (patch: Partial<AppSettings>) => void
+  updateProvider: (id: string, patch: Partial<ProviderConfig>) => void
+  setModalityRoute: (modality: string, route: ModalityRoute) => void
   applyLocale: () => void
   syncAppPaths: () => Promise<void>
   pushEngineConfig: () => Promise<boolean>
@@ -225,6 +334,28 @@ export const useAppStore = create<AppState>()(
       updateSettings: (patch) => {
         set((s) => ({ settings: { ...s.settings, ...patch } }))
         get().applyLocale()
+      },
+      updateProvider: (id, patch) => {
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            providers: {
+              ...s.settings.providers,
+              [id]: { ...s.settings.providers[id], ...patch }
+            }
+          }
+        }))
+      },
+      setModalityRoute: (modality, route) => {
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            modalityOverrides: {
+              ...s.settings.modalityOverrides,
+              [modality]: route
+            }
+          }
+        }))
       },
       applyLocale: () => {
         const lng = getEffectiveLocale(get().settings.locale)
@@ -443,6 +574,14 @@ export const useAppStore = create<AppState>()(
           wikiMap: s.wikiMap,
           thinkingScratch: s.thinkingScratch
         }
+      },
+      merge: (persisted: unknown, current) => {
+        const merged = { ...current, ...(persisted as Record<string, unknown>) } as AppState
+        // Migrate old settings format
+        if (merged.settings && !merged.settings.providers) {
+          merged.settings = migrateSettings(merged.settings)
+        }
+        return merged
       }
     }
   )

@@ -79,6 +79,7 @@ export default [
         FormData: "readonly",
         Response: "readonly",
         Headers: "readonly",
+        URLSearchParams: "readonly",
         crypto: "readonly",
       },
     },
