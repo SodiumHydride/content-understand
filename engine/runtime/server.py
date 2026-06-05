@@ -67,6 +67,8 @@ class LlamaServerProcess:
             chat,
             "-ngl",
             ngl,
+            "-np",
+            "1",
         ]
         if mmproj_path and mmproj_path.exists():
             cmd.extend(["--mmproj", str(mmproj_path)])
