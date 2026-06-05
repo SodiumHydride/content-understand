@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 import threading
 import time as _time_mod
-from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from engine.paths import app_data_root, models_dir, ensure_app_dirs
+from engine.paths import app_data_root, ensure_app_dirs, models_dir
 from engine.runtime.download import download_preset_files, preset_model_paths
 from engine.runtime.hardware import HardwareProfile, probe_hardware
 from engine.runtime.llama_bin import ensure_executable, find_llama_server
@@ -28,7 +28,7 @@ class _Sentinel:
 
 _UNSET = _Sentinel()
 
-_manager: "RuntimeManager | None" = None
+_manager: RuntimeManager | None = None
 
 
 class RuntimeManager:
@@ -54,9 +54,9 @@ class RuntimeManager:
         state: str | None = None,
         message: str | None = None,
         progress: dict[str, Any] | None = None,
-        active_preset_id: str | _SENTINEL = _UNSET,
-        local_base_url: str | None | _SENTINEL = _UNSET,
-        backend: str | None | _SENTINEL = _UNSET,
+        active_preset_id: str | _Sentinel = _UNSET,
+        local_base_url: str | None | _Sentinel = _UNSET,
+        backend: str | None | _Sentinel = _UNSET,
     ) -> None:
         with self._lock:
             if state is not None:

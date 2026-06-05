@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+
 from pydantic import BaseModel, Field
 
 _DEFAULT_CACHE_DIR = tempfile.gettempdir() + "/content_understand_cache"

@@ -15,22 +15,22 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from engine.config_bridge import settings_to_config
 from engine.index.db import list_pages, open_db
 from engine.index.rebuild import rebuild_from_vault, upsert_single_file
 from engine.paths import ensure_app_dirs, vault_dir
-from engine.config_bridge import settings_to_config
-from engine.runtime.manager import get_runtime_manager
-from engine.runtime.presets import recommend_preset, list_presets
 from engine.runtime.hardware import probe_hardware
+from engine.runtime.manager import get_runtime_manager
+from engine.runtime.presets import list_presets, recommend_preset
 from engine.understand.orchestrate import understand_url
 from engine.write.markdown import write_result
 
 try:
+    import uvicorn
     from fastapi import FastAPI, HTTPException
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import PlainTextResponse
     from pydantic import BaseModel
-    import uvicorn
 except ImportError:
     print("Install sidecar deps: pip install fastapi uvicorn pydantic requests", file=sys.stderr)
     sys.exit(1)
@@ -255,9 +255,9 @@ def runtime_auto_detect():
         return {"backend": "ollama", "url": ollama["base_url"], "state": "ready"}
 
     # Check if GGUF already downloaded
+    from engine.paths import models_dir
     from engine.runtime.download import preset_model_paths
     from engine.runtime.presets import recommend_preset
-    from engine.paths import models_dir
 
     preset = recommend_preset(rt.hardware)
     main_gguf, mmproj = preset_model_paths(preset, models_dir())

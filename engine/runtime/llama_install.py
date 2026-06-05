@@ -9,8 +9,8 @@ import stat
 import tarfile
 import tempfile
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 from urllib.request import urlretrieve
 
 logger = logging.getLogger(__name__)

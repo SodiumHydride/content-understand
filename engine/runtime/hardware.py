@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import platform
-import re
 import shutil
 import subprocess
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 
 
 @dataclass

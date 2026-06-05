@@ -55,11 +55,11 @@ def extract_html(
         if input.startswith("<"):
             html_content = input
         else:
-            with open(input, "r", encoding="utf-8", errors="replace") as f:
+            with open(input, encoding="utf-8", errors="replace") as f:
                 html_content = f.read()
     else:
         try:
-            with open(input, "r", encoding="utf-8", errors="replace") as f:
+            with open(input, encoding="utf-8", errors="replace") as f:
                 html_content = f.read()
         except Exception:
             raise ValueError(f"Cannot read input as HTML: {input[:100]}")

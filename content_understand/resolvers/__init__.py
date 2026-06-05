@@ -3,4 +3,4 @@
 from content_understand.resolvers.base import Resolver, ResolveResult
 from content_understand.resolvers.chain import ResolverChain
 
-__all__ = ["Resolver", "ResolveResult", "ResolverChain"]
+__all__ = ["ResolveResult", "Resolver", "ResolverChain"]

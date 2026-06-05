@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import tempfile
-import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 from urllib.parse import urlparse
 
 ProgressFn = Callable[[str, int, str], None]

@@ -8,11 +8,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from engine.paths import app_data_root, ensure_app_dirs
 from engine.runtime.hardware import probe_hardware
+from engine.runtime.llama_bin import find_llama_server
 from engine.runtime.ollama import detect_ollama
 from engine.runtime.presets import recommend_preset, recommendation_summary
-from engine.runtime.llama_bin import find_llama_server
-from engine.paths import app_data_root, ensure_app_dirs
 
 
 def main() -> None:

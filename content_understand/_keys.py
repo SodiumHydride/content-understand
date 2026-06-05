@@ -11,8 +11,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import requests
 from tenacity import (
@@ -122,7 +123,7 @@ def rotate_request(
 
     def _default_extractor(data: dict) -> str | None:
         # OpenAI-compatible format
-        if "choices" in data and data["choices"]:
+        if data.get("choices"):
             msg = data["choices"][0].get("message", {})
             content = msg.get("content")
             if not content:

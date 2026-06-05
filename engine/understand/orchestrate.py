@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import mimetypes
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from engine.understand.config import ContentConfig
 
@@ -91,7 +92,8 @@ def _build_pipeline(config: ContentConfig, on_progress: ProgressFn | None = None
     inference server is ready before building the pipeline.
     """
     from content_understand import ContentPipeline
-    from content_understand.config import ContentConfig as EngineConfig, BackendConfig as EngineBackend
+    from content_understand.config import BackendConfig as EngineBackend
+    from content_understand.config import ContentConfig as EngineConfig
 
     # Check if any content type uses local_server — ensure it's running
     local_needed = any(

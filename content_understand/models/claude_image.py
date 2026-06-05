@@ -24,7 +24,7 @@ def _claude_headers(key: str) -> dict[str, str]:
 
 def _claude_extractor(data: dict) -> str | None:
     """Extract text from Claude Messages API response."""
-    if "content" in data and data["content"]:
+    if data.get("content"):
         for block in data["content"]:
             if block.get("type") == "text" and block.get("text"):
                 return block["text"]
@@ -62,8 +62,8 @@ class ClaudeImageModel(ImageModel):
         # Claude requires base64, so download if URL
         tmp_path = None
         if not image_path and image_url:
-            import tempfile
             import os
+            import tempfile
 
             tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
             tmp_path = tmp.name

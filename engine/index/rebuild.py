@@ -5,11 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from engine.index.db import open_db, upsert_page, get_page_mtime, list_all_slugs
+from engine.index.db import get_page_mtime, list_all_slugs, open_db, upsert_page
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:

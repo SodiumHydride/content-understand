@@ -17,9 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from engine.paths import ensure_app_dirs, app_data_root
+from engine.paths import app_data_root, ensure_app_dirs
 from engine.runtime.llama_install import ensure_llama_server_binary
-from engine.runtime.llama_bin import find_llama_server
 from engine.runtime.manager import get_runtime_manager
 
 

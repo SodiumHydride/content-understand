@@ -10,14 +10,14 @@ Supports four model categories:
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from content_understand.config import BackendConfig
+    from content_understand.models.article_base import ArticleModel
+    from content_understand.models.audio_base import AudioModel
     from content_understand.models.base import VideoModel
     from content_understand.models.image_base import ImageModel
-    from content_understand.models.audio_base import AudioModel
-    from content_understand.models.article_base import ArticleModel
 
 # ── Video backends ──────────────────────────────────────────────────
 _VIDEO_BACKENDS: dict[str, tuple[str, str]] = {
@@ -121,7 +121,7 @@ def create_model(
     content_type: str,
     backend_name: str,
     config: BackendConfig,
-) -> Union[VideoModel, ImageModel, AudioModel, ArticleModel]:
+) -> VideoModel | ImageModel | AudioModel | ArticleModel:
     """Create a model for the given content type.
 
     Args:

@@ -78,7 +78,6 @@ def settings_to_config(data: dict[str, Any]) -> ContentConfig:
             base = (local_base or "http://127.0.0.1:11434/v1").rstrip("/")
             if not base.endswith("/v1"):
                 base = f"{base}/v1"
-            preset = rt.active_preset_id or "gemma4-12b-multimodal"
             if not model:
                 model = "gemma"
             return BackendConfig(

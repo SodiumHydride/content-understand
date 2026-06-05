@@ -14,7 +14,6 @@ sys.path.insert(0, str(ROOT))
 
 from engine.runtime.llama_install import LLAMA_RELEASE_BASE, LLAMA_RELEASE_TAG
 
-
 ASSETS = {
     "darwin-arm64": f"llama-{LLAMA_RELEASE_TAG}-bin-macos-arm64.tar.gz",
     "darwin-x64": f"llama-{LLAMA_RELEASE_TAG}-bin-macos-x64.tar.gz",
@@ -42,7 +41,7 @@ def main() -> int:
                 size_mb = path.stat().st_size / (1024 * 1024)
                 if name.endswith(".zip"):
                     if not check_zip_has_server(path):
-                        print(f"  FAIL: no llama-server.exe in zip")
+                        print("  FAIL: no llama-server.exe in zip")
                         continue
                 print(f"  OK ({size_mb:.1f} MB)")
                 ok += 1

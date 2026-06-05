@@ -38,8 +38,8 @@ class MimoModel(VideoModel):
             raise ValueError("Either video_url or video_path is required")
 
         if not video_url and video_path:
-            from content_understand.preprocessors.ffmpeg import FFmpegPreprocessor
             from content_understand.config import FFmpegConfig
+            from content_understand.preprocessors.ffmpeg import FFmpegPreprocessor
 
             ffmpeg = FFmpegPreprocessor(FFmpegConfig())
             b64 = ffmpeg.encode_to_base64(video_path)
