@@ -60,16 +60,51 @@ export function SettingsModal(): React.JSX.Element | null {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [runtimeRec, setRuntimeRec] = useState<RuntimeRecommend | null>(null)
   const [runtimeState, setRuntimeState] = useState<string>('')
+  const [runtimeProgress, setRuntimeProgress] = useState<{ percent: number; message: string } | null>(null)
   const [presets, setPresets] = useState<RuntimePreset[]>([])
   const [downloaded, setDownloaded] = useState<DownloadedModel[] | null>(null)
   const [totalSize, setTotalSize] = useState(0)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Poll runtime status when setup is in progress
+  const startPolling = React.useCallback(() => {
+    if (pollRef.current) return
+    pollRef.current = setInterval(async () => {
+      const s = await fetchRuntimeStatus()
+      if (!s) return
+      setRuntimeState(s.state)
+      if (s.progress) {
+        setRuntimeProgress({ percent: s.progress.percent ?? 0, message: s.progress.message ?? '' })
+      }
+      if (s.state === 'ready' || s.state === 'error' || s.state === 'idle') {
+        setRuntimeProgress(null)
+        if (pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = null
+        }
+        // Refresh downloaded models list
+        void fetchDownloadedModels().then((r) => {
+          if (r) { setDownloaded(r.models); setTotalSize(r.total_size_bytes) }
+        })
+      }
+    }, 1000)
+  }, [])
+
+  React.useEffect(() => {
+    return () => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    }
+  }, [])
 
   useEffect(() => {
     if (!open || tab !== 'models') return
     void fetchRuntimeRecommend().then(setRuntimeRec)
     void fetchRuntimeStatus().then((s) => {
-      if (s && typeof s.state === 'string') setRuntimeState(s.state)
+      if (s && typeof s.state === 'string') {
+        setRuntimeState(s.state)
+        if (s.state === 'working') startPolling()
+      }
     })
     void fetchPresets().then(setPresets)
     void fetchDownloadedModels().then((r) => {
@@ -78,7 +113,7 @@ export function SettingsModal(): React.JSX.Element | null {
         setTotalSize(r.total_size_bytes)
       }
     })
-  }, [open, tab])
+  }, [open, tab, startPolling])
 
   if (!open) return null
 
@@ -259,7 +294,11 @@ export function SettingsModal(): React.JSX.Element | null {
                         {isZh ? runtimeRec.summary_zh : runtimeRec.summary_en}
                       </pre>
                       <p className="mt-2 text-ink-600">
-                        {t('settings.runtimeState')}: {runtimeState || 'idle'}
+                        {t('settings.runtimeState')}:{' '}
+                        {runtimeState === 'ready' ? (isZh ? '就绪 ✓' : 'Ready ✓')
+                          : runtimeState === 'working' ? (isZh ? '准备中...' : 'Working...')
+                          : runtimeState === 'error' ? (isZh ? '错误' : 'Error')
+                          : (isZh ? '空闲' : 'Idle')}
                       </p>
                     </div>
                   )}
@@ -277,15 +316,50 @@ export function SettingsModal(): React.JSX.Element | null {
                     <button
                       type="button"
                       className="settings-btn-secondary"
+                      disabled={runtimeState === 'working'}
                       onClick={async () => {
                         const pid = settings.localPresetId || runtimeRec?.recommended_preset_id || null
                         await startRuntimeSetup(pid, settings.useOllamaIfAvailable)
-                        save()
+                        setRuntimeState('working')
+                        setRuntimeProgress({ percent: 5, message: isZh ? '启动中...' : 'Starting...' })
+                        startPolling()
                       }}
                     >
-                      {t('settings.prepareLocalEngine')}
+                      {runtimeState === 'working'
+                        ? (isZh ? '准备中...' : 'Preparing...')
+                        : t('settings.prepareLocalEngine')}
                     </button>
                   </div>
+
+                  {/* Progress display */}
+                  {runtimeState === 'working' && runtimeProgress && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-ink-600">{runtimeProgress.message}</span>
+                        <span className="text-ink-500">{runtimeProgress.percent}%</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-shelf)]">
+                        <div
+                          className="h-full rounded-full bg-[var(--color-accent)] transition-all duration-300"
+                          style={{ width: `${Math.max(2, runtimeProgress.percent)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {runtimeState === 'ready' && (
+                    <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--color-accent)]">
+                      <span>✓</span>
+                      <span>{isZh ? '本地引擎就绪' : 'Local engine ready'}</span>
+                      {runtimeProgress?.message && (
+                        <span className="text-ink-500">· {runtimeProgress.message}</span>
+                      )}
+                    </div>
+                  )}
+                  {runtimeState === 'error' && (
+                    <p className="text-[12px] text-[var(--color-danger)]">
+                      {isZh ? '启动失败，请检查日志' : 'Setup failed, check logs'}
+                    </p>
+                  )}
                   <label className="flex items-center gap-2 text-xs text-ink-700">
                     <input
                       type="checkbox"

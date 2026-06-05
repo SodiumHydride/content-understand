@@ -67,10 +67,12 @@ class RuntimeManager:
         with self._lock:
             if state is not None:
                 self._state = state
+                self._status_cache = None  # invalidate on state change
             if message is not None:
                 self._message = message
             if progress is not None:
                 self._progress = progress
+                self._status_cache = None  # invalidate on progress update
             if active_preset_id is not _UNSET:
                 self._active_preset_id = active_preset_id
             if local_base_url is not _UNSET:
