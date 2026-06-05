@@ -1,11 +1,15 @@
-"""Light SQLite index — cache only; Markdown vault is source of truth."""
+"""Light SQLite index — cache only; Markdown vault is source of truth.
+
+Uses WAL mode for concurrent read/write safety and a module-level
+connection pool so multiple threads don't create competing connections.
+"""
 
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
-
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pages (
@@ -19,7 +23,8 @@ CREATE TABLE IF NOT EXISTS pages (
     tags TEXT NOT NULL DEFAULT '[]',
     created TEXT NOT NULL DEFAULT '',
     updated TEXT NOT NULL DEFAULT '',
-    body_hash TEXT NOT NULL DEFAULT ''
+    body_hash TEXT NOT NULL DEFAULT '',
+    file_mtime REAL NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pages_url ON pages(url) WHERE url != '';
@@ -36,29 +41,72 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 """
 
+# Module-level connection pool: one connection per vault path.
+# Thread-safe via threading.Lock.
+_pool_lock = threading.Lock()
+_connections: dict[str, sqlite3.Connection] = {}
+
 
 def open_db(vault_path: Path) -> sqlite3.Connection:
-    meta = vault_path / ".content-app"
-    meta.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(meta / "index.db")
-    conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    return conn
+    """Get or create a SQLite connection for the given vault path.
+
+    Uses WAL mode for concurrent read/write safety.
+    Connections are pooled — repeated calls for the same vault_path
+    return the same connection object.
+    """
+    db_path = str(vault_path / ".content-app" / "index.db")
+
+    with _pool_lock:
+        conn = _connections.get(db_path)
+        if conn is not None:
+            try:
+                # Test if connection is still alive
+                conn.execute("SELECT 1")
+                return conn
+            except sqlite3.ProgrammingError:
+                # Connection was closed, remove from pool
+                _connections.pop(db_path, None)
+
+        (vault_path / ".content-app").mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(
+            db_path,
+            timeout=30,  # Wait up to 30s for locks
+            check_same_thread=False,  # Allow cross-thread use
+        )
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")  # Concurrent reads + single write
+        conn.execute("PRAGMA busy_timeout=10000")  # 10s retry on lock
+        conn.executescript(SCHEMA)
+        _connections[db_path] = conn
+        return conn
+
+
+def get_page_mtime(conn: sqlite3.Connection, slug: str) -> float | None:
+    """Return the stored file_mtime for a slug, or None if not found."""
+    row = conn.execute("SELECT file_mtime FROM pages WHERE slug=?", (slug,)).fetchone()
+    return row[0] if row else None
 
 
 def upsert_page(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
     conn.execute(
         """
-        INSERT INTO pages (slug, path, title, type, platform, url, summary, tags, created, updated, body_hash)
-        VALUES (:slug, :path, :title, :type, :platform, :url, :summary, :tags, :created, :updated, :body_hash)
+        INSERT INTO pages (slug, path, title, type, platform, url, summary, tags, created, updated, body_hash, file_mtime)
+        VALUES (:slug, :path, :title, :type, :platform, :url, :summary, :tags, :created, :updated, :body_hash, :file_mtime)
         ON CONFLICT(slug) DO UPDATE SET
             path=excluded.path, title=excluded.title, type=excluded.type,
             platform=excluded.platform, url=excluded.url, summary=excluded.summary,
-            tags=excluded.tags, updated=excluded.updated, body_hash=excluded.body_hash
+            tags=excluded.tags, updated=excluded.updated, body_hash=excluded.body_hash,
+            file_mtime=excluded.file_mtime
         """,
         row,
     )
     conn.commit()
+
+
+def list_all_slugs(conn: sqlite3.Connection) -> set[str]:
+    """Return all slug values currently in the index."""
+    rows = conn.execute("SELECT slug FROM pages").fetchall()
+    return {row[0] for row in rows}
 
 
 def list_pages(conn: sqlite3.Connection, limit: int = 200) -> list[dict[str, Any]]:

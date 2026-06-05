@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Pin } from 'lucide-react'
+import { Pin, Plus } from 'lucide-react'
+import { libraryItemMatchesQuery } from '../lib/libraryFilter'
 import { useAppStore } from '../stores/appStore'
 import type { LibraryItem } from '../stores/types'
 import {
@@ -60,10 +61,10 @@ export function VaultView(): React.JSX.Element {
   const { t } = useTranslation()
   const library = useAppStore((s) => s.library)
   const pinnedSlugs = useAppStore((s) => s.pinnedSlugs)
+  const libraryQuery = useAppStore((s) => s.libraryQuery)
   const vaultLayout = useAppStore((s) => s.vaultLayout)
   const selectedSlug = useAppStore((s) => s.selectedSlug)
   const selectItem = useAppStore((s) => s.selectItem)
-  const setViewMode = useAppStore((s) => s.setViewMode)
   const createNote = useAppStore((s) => s.createNote)
   const pinNote = useAppStore((s) => s.pinNote)
   const togglePin = useAppStore((s) => s.togglePin)
@@ -140,11 +141,17 @@ export function VaultView(): React.JSX.Element {
         viewMode: 'vault',
         pos
       })
-      selectItem(slug)
+      selectItem(slug, { reader: false })
       if (edit) setEditingSlug(slug)
     },
     [createNote, selectItem, boardSize.w, boardSize.h]
   )
+
+  const spawnAtCenter = useCallback(() => {
+    const x = Math.max(32, boardSize.w / 2 - VAULT_NOTE_W / 2)
+    const y = Math.max(32, boardSize.h / 2 - VAULT_NOTE_H / 2)
+    spawnSticky(x, y, true)
+  }, [boardSize.w, boardSize.h, spawnSticky])
 
   const clearPendingClick = useCallback(() => {
     if (clickTimerRef.current !== null) {
@@ -189,7 +196,7 @@ export function VaultView(): React.JSX.Element {
     e.stopPropagation()
     clearPendingClick()
     const pos = clientToBoard(e.clientX, e.clientY)
-    selectItem(slug)
+    selectItem(slug, { reader: false })
     setMenu({
       x: e.clientX,
       y: e.clientY,
@@ -247,20 +254,23 @@ export function VaultView(): React.JSX.Element {
       rawX: x,
       rawY: y
     })
-    selectItem(slug)
+    selectItem(slug, { reader: false })
   }
 
   const onNoteClick = (slug: string) => {
     if (movedRef.current) return
     clearPendingClick()
-    selectItem(slug)
+    selectItem(slug, { reader: false })
   }
 
   const onNoteDoubleClick = (slug: string, item: LibraryItem) => {
     clearPendingClick()
-    if (item.platform !== 'self') return
-    selectItem(slug)
-    setEditingSlug(slug)
+    if (item.platform === 'self') {
+      selectItem(slug, { reader: false })
+      setEditingSlug(slug)
+      return
+    }
+    selectItem(slug, { reader: true })
   }
 
   const commitEdit = (slug: string, draft: string) => {
@@ -318,10 +328,7 @@ export function VaultView(): React.JSX.Element {
       {
         kind: 'item',
         label: t('vault.menu.read'),
-        onSelect: () => {
-          selectItem(slug)
-          setViewMode('journal')
-        }
+        onSelect: () => selectItem(slug, { reader: true })
       },
       { kind: 'separator' },
       {
@@ -342,22 +349,25 @@ export function VaultView(): React.JSX.Element {
     pinNote,
     library,
     selectItem,
-    setViewMode,
     togglePin,
     editingSlug,
     boardSize.w,
     boardSize.h
   ])
 
+  const searchActive = libraryQuery.trim().length > 0
+
   return (
     <div className="view-page view-page-vault">
-      <header className="view-header view-header-vault no-drag">
-        <div className="view-header-top">
-          <div className="page-heading">
-            <h1 className="page-title">{t('vault.pageTitle')}</h1>
-            <p className="page-lead">{t('vault.pageSub')}</p>
-          </div>
-          <span className="journal-milestone">{t('vault.pinnedCount', { count: pinned.length })}</span>
+      <header className="view-toolbar view-toolbar-spatial no-drag">
+        <h1 className="view-toolbar-title">{t('vault.pageTitle')}</h1>
+        <span className="view-toolbar-meta">{t('vault.pinnedCount', { count: pinned.length })}</span>
+        <span className="view-toolbar-spacer" />
+        <div className="view-toolbar-actions">
+          <button type="button" className="btn-ghost" onClick={() => spawnAtCenter()}>
+            <Plus size={14} />
+            {t('vault.newSticky')}
+          </button>
         </div>
       </header>
 
@@ -376,6 +386,7 @@ export function VaultView(): React.JSX.Element {
             <div className="vault-empty-hint" aria-hidden>
               <Pin size={24} strokeWidth={1.25} />
               <p>{t('vault.emptyCanvasHint')}</p>
+              <p className="vault-empty-hint-detail">{t('vault.emptyCanvasDetail')}</p>
             </div>
           )}
 
@@ -387,6 +398,9 @@ export function VaultView(): React.JSX.Element {
             const slices = getVaultWrapSlices(base.x, base.y, boardSize.w, boardSize.h)
             const editing = editingSlug === item.slug
             const draft = editing ? notePlainBody(item.body) || item.title : undefined
+
+            const searchDim =
+              searchActive && !libraryItemMatchesQuery(item, libraryQuery)
 
             return slices.map((slice, idx) => {
               const isBody = slice.kind === 'body'
@@ -402,6 +416,7 @@ export function VaultView(): React.JSX.Element {
                   wrap={slice.kind === 'wrap'}
                   dragging={isDragging}
                   instant={instantSlug === item.slug}
+                  searchDim={searchDim}
                   onSelect={() => onNoteClick(item.slug)}
                   onDoubleClick={() => onNoteDoubleClick(item.slug, item)}
                   onCommitEdit={(text) => commitEdit(item.slug, text)}

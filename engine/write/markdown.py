@@ -1,9 +1,10 @@
-"""Write understanding results to vault Markdown (full writer migrates from sodium wiki_writer)."""
+"""Write understanding results to vault Markdown."""
 
 from __future__ import annotations
 
 import json
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,14 +20,19 @@ def _yaml_quote(value: str) -> str:
 
 
 def write_result(vault_path: Path, result: dict) -> Path:
-    """Persist a minimal markdown note; replace with contract-based writer later."""
+    """Persist a markdown note to the vault.
+
+    Filename: {date}_{slug}_{short_uuid}.md — the UUID suffix prevents
+    collisions when two URLs produce the same title on the same day.
+    """
     content_type = result.get("type", "video")
     subdir = vault_path / content_type
     subdir.mkdir(parents=True, exist_ok=True)
 
     title = result.get("title", "Untitled")
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    fname = f"{date}_{slugify(title)}.md"
+    short_id = uuid.uuid4().hex[:8]
+    fname = f"{date}_{slugify(title)}_{short_id}.md"
     path = subdir / fname
 
     tags = result.get("tags", [])

@@ -24,6 +24,7 @@ export function StickyNoteCard({
   wrap = false,
   dragging = false,
   instant = false,
+  searchDim = false,
   onSelect,
   onDoubleClick,
   onCommitEdit,
@@ -40,6 +41,7 @@ export function StickyNoteCard({
   wrap?: boolean
   dragging?: boolean
   instant?: boolean
+  searchDim?: boolean
   onSelect: () => void
   onDoubleClick: () => void
   onCommitEdit: (text: string) => void
@@ -78,7 +80,8 @@ export function StickyNoteCard({
         wrap && 'sticky-note-wrap',
         dragging && 'sticky-note-dragging',
         instant && 'sticky-note-instant',
-        interactive && 'sticky-note-grabbable'
+        interactive && 'sticky-note-grabbable',
+        searchDim && 'sticky-note-search-dim'
       )}
       style={
         {

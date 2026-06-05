@@ -52,17 +52,38 @@ export interface LibraryItem {
   body?: string
 }
 
-export type BackendId = 'mimo' | 'openai_compat' | 'gemma'
+/** Cloud OpenAI-compatible, local server, or vendor presets. */
+export type BackendId = 'openai_compat' | 'local_server' | 'mimo' | 'gemini' | 'claude'
+
+export type InferenceMode = 'prefer_local' | 'prefer_api' | 'local_only' | 'api_only'
 
 export interface AppSettings {
   locale: 'zh' | 'en' | 'system'
+  /** Filled from app userData — not user-picked C: / D: drive. */
   vaultPath: string
+  cacheDir: string
+  modelsDir: string
+  /** Cloud API base URL (OpenAI-compatible, Anthropic, etc.) */
   apiBase: string
+  /** Cloud API key (generic fallback) */
   apiKey: string
+  /** Vendor-specific API keys (comma-separated for multi-key rotation) */
+  mimoKeys: string
+  geminiKeys: string
   videoBackend: BackendId
   imageBackend: BackendId
   audioBackend: BackendId
   articleBackend: BackendId
+  videoModel: string
+  imageModel: string
+  audioModel: string
+  articleModel: string
   cookiesPath: string
-  cacheDir: string
+  huggingFaceModelId: string
+  inferenceMode: InferenceMode
+  localPresetId: string
+  useOllamaIfAvailable: boolean
+  localEngineConfirmed: boolean
+  /** Auto-start local inference server on first understanding request */
+  autoStartLocal: boolean
 }

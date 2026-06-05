@@ -3,23 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { BookMarked } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { groupLibraryByJournal } from '../lib/contentMeta'
+import { filterLibraryItems } from '../lib/libraryFilter'
 import { LibraryCard } from './LibraryCard'
 import { PipelineStepper } from './PipelineStepper'
 import { EmptyState } from './EmptyState'
-
-function filterItems(
-  library: ReturnType<typeof useAppStore.getState>['library'],
-  query: string
-) {
-  const q = query.trim().toLowerCase()
-  if (!q) return library
-  return library.filter(
-    (item) =>
-      item.title.toLowerCase().includes(q) ||
-      item.summary.toLowerCase().includes(q) ||
-      item.tags.some((tag) => tag.toLowerCase().includes(q))
-  )
-}
 
 export function JournalView(): React.JSX.Element {
   const { t, i18n } = useTranslation()
@@ -32,7 +19,10 @@ export function JournalView(): React.JSX.Element {
   const laneRef = useRef<HTMLDivElement>(null)
 
   const locale = i18n.language.startsWith('zh') ? 'zh-cn' : 'en'
-  const filtered = useMemo(() => filterItems(library, libraryQuery), [library, libraryQuery])
+  const filtered = useMemo(
+    () => filterLibraryItems(library, libraryQuery),
+    [library, libraryQuery]
+  )
   const days = useMemo(() => groupLibraryByJournal(filtered, locale), [filtered, locale])
   const timelineDays = useMemo(() => [...days].reverse(), [days])
   const processing = tasks.filter((task) => task.status === 'processing')
@@ -46,16 +36,9 @@ export function JournalView(): React.JSX.Element {
 
   return (
     <div className="view-page view-page-journal">
-      <header className="view-header no-drag">
-        <div className="view-header-top">
-          <div className="page-heading">
-            <h1 className="page-title">{t('journal.pageTitle')}</h1>
-            <p className="page-lead">{t('journal.pageSub', { count: filtered.length })}</p>
-          </div>
-          {filtered.length > 0 && (
-            <span className="journal-milestone">{t('journal.milestone', { count: filtered.length })}</span>
-          )}
-        </div>
+      <header className="view-toolbar no-drag">
+        <h1 className="view-toolbar-title">{t('journal.pageTitle')}</h1>
+        <span className="view-toolbar-meta">{t('journal.pageMeta', { count: filtered.length })}</span>
       </header>
 
       <div ref={laneRef} className="journal-scroll journal-scroll-horizontal">

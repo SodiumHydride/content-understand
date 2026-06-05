@@ -37,6 +37,14 @@ export function AppChrome(): React.JSX.Element {
   const vaultDisplay = settings.vaultPath || t('vault.unconfigured')
   const uiLang = i18n.language.startsWith('zh') ? 'zh' : 'en'
   const showSearch = library.length > 0
+  const searchPlaceholder =
+    viewMode === 'journal'
+      ? t('library.search')
+      : viewMode === 'vault'
+        ? t('library.searchVault')
+        : viewMode === 'map'
+          ? t('library.searchMap')
+          : t('library.searchTimeline')
 
   const setLanguage = (locale: AppLocale): void => {
     updateSettings({ locale })
@@ -81,7 +89,7 @@ export function AppChrome(): React.JSX.Element {
               <input
                 value={libraryQuery}
                 onChange={(e) => setLibraryQuery(e.target.value)}
-                placeholder={t('library.search')}
+                placeholder={searchPlaceholder}
                 className="toolbar-search"
               />
             </div>

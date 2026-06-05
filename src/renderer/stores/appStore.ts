@@ -17,14 +17,27 @@ import { syncDocumentLocale } from '../lib/localeUi'
 const defaultSettings: AppSettings = {
   locale: 'system',
   vaultPath: '',
+  cacheDir: '',
+  modelsDir: '',
   apiBase: '',
   apiKey: '',
-  videoBackend: 'mimo',
-  imageBackend: 'mimo',
-  audioBackend: 'mimo',
-  articleBackend: 'mimo',
+  mimoKeys: '',
+  geminiKeys: '',
+  videoBackend: 'openai_compat',
+  imageBackend: 'openai_compat',
+  audioBackend: 'openai_compat',
+  articleBackend: 'openai_compat',
+  videoModel: '',
+  imageModel: '',
+  audioModel: '',
+  articleModel: '',
   cookiesPath: '',
-  cacheDir: ''
+  huggingFaceModelId: '',
+  inferenceMode: 'prefer_api',
+  localPresetId: '',
+  useOllamaIfAvailable: true,
+  localEngineConfirmed: false,
+  autoStartLocal: true
 }
 
 const demoSlug = 'video/demo-welcome'
@@ -133,6 +146,7 @@ interface AppState {
   filter: ContentType
   libraryQuery: string
   selectedSlug: string | null
+  readerOpen: boolean
   tasks: UnderstandTask[]
   library: LibraryItem[]
   sidecarOnline: boolean
@@ -150,9 +164,12 @@ interface AppState {
   setMapMode: (mode: MapMode) => void
   updateSettings: (patch: Partial<AppSettings>) => void
   applyLocale: () => void
+  syncAppPaths: () => Promise<void>
+  pushEngineConfig: () => Promise<boolean>
   setFilter: (filter: ContentType) => void
   setLibraryQuery: (q: string) => void
-  selectItem: (slug: string | null) => void
+  selectItem: (slug: string | null, opts?: { reader?: boolean }) => void
+  closeReader: () => void
   setInputUrl: (url: string) => void
   setDragging: (v: boolean) => void
   setSidecarOnline: (v: boolean) => void
@@ -168,7 +185,7 @@ interface AppState {
   updateNote: (slug: string, patch: Partial<Pick<LibraryItem, 'title' | 'body' | 'summary'>>) => void
   setVaultNodePos: (slug: string, pos: MapNodePos) => void
   setMapNodePos: (map: MapMode, id: string, pos: MapNodePos) => void
-  addScratchNode: (text: string) => void
+  addScratchNode: (text: string, pos?: MapNodePos) => void
   updateScratchNode: (id: string, patch: Partial<ScratchNode>) => void
   addTask: (task: UnderstandTask) => void
   updateTask: (id: string, patch: Partial<UnderstandTask>) => void
@@ -185,6 +202,7 @@ export const useAppStore = create<AppState>()(
       filter: 'all',
       libraryQuery: '',
       selectedSlug: null,
+      readerOpen: false,
       tasks: [],
       library: demoLibraryFor(getEffectiveLocale('system')),
       sidecarOnline: false,
@@ -199,7 +217,11 @@ export const useAppStore = create<AppState>()(
 
       setSettingsOpen: (open) => set({ settingsOpen: open }),
       setViewMode: (viewMode) => set({ viewMode }),
-      setMapMode: (mapMode) => set({ mapMode }),
+      setMapMode: (mapMode) =>
+        set((s) => ({
+          mapMode,
+          readerOpen: mapMode === 'wiki' && s.viewMode === 'map' ? false : s.readerOpen
+        })),
       updateSettings: (patch) => {
         set((s) => ({ settings: { ...s.settings, ...patch } }))
         get().applyLocale()
@@ -213,9 +235,40 @@ export const useAppStore = create<AppState>()(
           set({ library: demoLibraryFor(lng) })
         }
       },
+      syncAppPaths: async () => {
+        const paths = await window.api.getAppPaths()
+        set((s) => ({
+          settings: {
+            ...s.settings,
+            vaultPath: paths.vault,
+            cacheDir: paths.cache,
+            modelsDir: paths.models
+          }
+        }))
+      },
+      pushEngineConfig: async (): Promise<boolean> => {
+        const { pushConfig } = await import('../lib/sidecar')
+        const ok = await pushConfig(get().settings)
+        if (!ok) {
+          console.warn('[appStore] pushEngineConfig failed — sidecar may be offline')
+        }
+        return ok
+      },
       setFilter: (filter) => set({ filter }),
       setLibraryQuery: (libraryQuery) => set({ libraryQuery }),
-      selectItem: (selectedSlug) => set({ selectedSlug }),
+      selectItem: (selectedSlug, opts) => {
+        if (selectedSlug === null) {
+          set({ selectedSlug: null, readerOpen: false })
+          return
+        }
+        const s = get()
+        let readerOpen = opts?.reader
+        if (readerOpen === undefined) {
+          readerOpen = s.viewMode === 'journal'
+        }
+        set({ selectedSlug, readerOpen })
+      },
+      closeReader: () => set({ readerOpen: false }),
       setInputUrl: (inputUrl) => set({ inputUrl }),
       setDragging: (isDragging) => set({ isDragging }),
       setSidecarOnline: (sidecarOnline) => set({ sidecarOnline }),
@@ -288,14 +341,13 @@ export const useAppStore = create<AppState>()(
             ? { thinkingMap: { ...s.thinkingMap, [id]: pos } }
             : { wikiMap: { ...s.wikiMap, [id]: pos } }
         ),
-      addScratchNode: (text) => {
+      addScratchNode: (text, pos) => {
         const id = `scratch-${crypto.randomUUID()}`
         const count = get().thinkingScratch.length
+        const x = pos?.x ?? 80 + (count % 3) * 48
+        const y = pos?.y ?? 80 + Math.floor(count / 3) * 40
         set((s) => ({
-          thinkingScratch: [
-            ...s.thinkingScratch,
-            { id, text, x: 80 + (count % 3) * 48, y: 80 + Math.floor(count / 3) * 40 }
-          ]
+          thinkingScratch: [...s.thinkingScratch, { id, text, x, y }]
         }))
       },
       updateScratchNode: (id, patch) =>
@@ -359,15 +411,15 @@ export const useAppStore = create<AppState>()(
             return
           }
 
-          await pollJob(jobId, (progress) => {
+          const resultSlug = await pollJob(jobId, (progress) => {
             get().updateTask(id, { progress })
           })
 
-          get().updateTask(id, { status: 'completed' })
+          get().updateTask(id, { status: 'completed', slug: resultSlug ?? undefined })
           await get().refreshLibrary()
-          const lib = get().library
-          if (lib.length > 0) {
-            set({ viewMode: 'journal', selectedSlug: lib[0].slug })
+          const slug = resultSlug ?? get().library[0]?.slug
+          if (slug) {
+            set({ viewMode: 'journal', selectedSlug: slug })
           }
         } catch (e) {
           get().updateTask(id, {
@@ -379,16 +431,19 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'content-understand-settings',
-      partialize: (s) => ({
-        settings: s.settings,
-        viewMode: s.viewMode,
-        pinnedSlugs: s.pinnedSlugs,
-        vaultLayout: s.vaultLayout,
-        mapMode: s.mapMode,
-        thinkingMap: s.thinkingMap,
-        wikiMap: s.wikiMap,
-        thinkingScratch: s.thinkingScratch
-      })
+      partialize: (s) => {
+        const { vaultPath: _v, cacheDir: _c, modelsDir: _m, ...restSettings } = s.settings
+        return {
+          settings: restSettings,
+          viewMode: s.viewMode,
+          pinnedSlugs: s.pinnedSlugs,
+          vaultLayout: s.vaultLayout,
+          mapMode: s.mapMode,
+          thinkingMap: s.thinkingMap,
+          wikiMap: s.wikiMap,
+          thinkingScratch: s.thinkingScratch
+        }
+      }
     }
   )
 )

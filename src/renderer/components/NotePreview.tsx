@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ExternalLink, FolderOpen, Pin, X } from 'lucide-react'
+import { Download, ExternalLink, FolderOpen, Pin, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { fetchPage } from '../lib/sidecar'
 import {
@@ -11,14 +12,23 @@ import {
   platformLabel,
   TYPE_STYLES
 } from '../lib/contentMeta'
+import type { ReaderPresentation } from '../lib/readerPresentation'
+import { getReaderPresentation } from '../lib/readerPresentation'
 import type { LibraryItem } from '../stores/types'
 
-export function NotePreview(): React.JSX.Element | null {
+export function NotePreview({
+  presentation = 'sidebar'
+}: {
+  presentation?: ReaderPresentation
+}): React.JSX.Element | null {
   const { t } = useTranslation()
   const selectedSlug = useAppStore((s) => s.selectedSlug)
   const library = useAppStore((s) => s.library)
   const settings = useAppStore((s) => s.settings)
+  const viewMode = useAppStore((s) => s.viewMode)
+  const mapMode = useAppStore((s) => s.mapMode)
   const selectItem = useAppStore((s) => s.selectItem)
+  const closeReader = useAppStore((s) => s.closeReader)
   const togglePin = useAppStore((s) => s.togglePin)
   const isPinned = useAppStore((s) => s.isPinned)
 
@@ -39,13 +49,37 @@ export function NotePreview(): React.JSX.Element | null {
     })
   }, [selectedSlug, library])
 
+  const dismissReader = (): void => {
+    const mode = getReaderPresentation(viewMode, mapMode)
+    if (mode === 'center' || mode === 'overlay') closeReader()
+    else selectItem(null)
+  }
+
+  useEffect(() => {
+    if ((presentation !== 'center' && presentation !== 'overlay') || !selectedSlug) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeReader()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [presentation, selectedSlug, closeReader])
+
   if (!selectedSlug) return null
 
   const type = detail ? normalizeShelfType(String(detail.type)) : 'article'
   const accent = TYPE_STYLES[type].accent
 
-  return (
-    <aside className="note-preview-pane no-drag">
+  const pane = (
+    <aside
+      className={clsx(
+        'note-preview-pane no-drag',
+        presentation === 'center' && 'note-preview-pane-center',
+        presentation === 'overlay' && 'note-preview-pane-overlay'
+      )}
+    >
       <div className="note-preview-toolbar">
         <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
           {detail ? (
@@ -66,7 +100,7 @@ export function NotePreview(): React.JSX.Element | null {
           )}
           <button
             type="button"
-            onClick={() => selectItem(null)}
+            onClick={dismissReader}
             className="btn-ghost shrink-0 p-1"
             aria-label={t('preview.close')}
           >
@@ -86,8 +120,11 @@ export function NotePreview(): React.JSX.Element | null {
             <button
               type="button"
               onClick={() => {
+                // Normalize path separators for cross-platform (Windows backslash)
+                const sep = settings.vaultPath?.includes('\\') ? '\\' : '/'
+                const normalizedPath = detail.path.replace(/[/\\]/g, sep)
                 const full = settings.vaultPath
-                  ? `${settings.vaultPath}/${detail.path}`
+                  ? `${settings.vaultPath}${sep}${normalizedPath}`
                   : detail.path
                 void window.api.showItemInFolder(full)
               }}
@@ -95,6 +132,14 @@ export function NotePreview(): React.JSX.Element | null {
             >
               <FolderOpen size={13} />
               {t('preview.openFolder')}
+            </button>
+            <button
+              type="button"
+              onClick={() => void window.api.exportNote(detail.path)}
+              className="btn-ghost"
+            >
+              <Download size={13} />
+              {t('preview.exportMd')}
             </button>
             {detail.url && (
               <a href={detail.url} target="_blank" rel="noreferrer" className="btn-ghost">
@@ -128,4 +173,44 @@ export function NotePreview(): React.JSX.Element | null {
       )}
     </aside>
   )
+
+  if (presentation === 'center') {
+    return createPortal(
+      <div
+        className="note-reader-overlay no-drag"
+        role="presentation"
+        onClick={() => closeReader()}
+      >
+        <div
+          className="note-reader-overlay-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-label={detail?.title ?? t('preview.reading')}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {pane}
+        </div>
+      </div>,
+      document.body
+    )
+  }
+
+  if (presentation === 'overlay') {
+    return createPortal(
+      <div className="note-reader-drawer-layer no-drag" role="presentation">
+        <button
+          type="button"
+          className="note-reader-drawer-scrim"
+          aria-label={t('preview.close')}
+          onClick={() => closeReader()}
+        />
+        <div role="dialog" aria-modal="true" aria-label={detail?.title ?? t('preview.reading')}>
+          {pane}
+        </div>
+      </div>,
+      document.body
+    )
+  }
+
+  return pane
 }

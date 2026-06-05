@@ -82,6 +82,7 @@
   --capture-composer-min-h: 7.25rem;
   --capture-action-min-w: 9rem;
   --page-heading-min-h: 3.75rem;
+  --view-toolbar-h: 2.75rem;
   --vault-strip-h: 2.25rem;
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -647,6 +648,64 @@ html[data-locale='en'] {
   padding: var(--space-8) var(--page-pad-x) var(--space-5);
   border-bottom: 1px solid var(--divider);
   background: var(--color-paper);
+}
+
+/* Spatial / list views — one toolbar row; long leads live in empty states only */
+.view-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--view-toolbar-h);
+  padding: var(--space-2) var(--page-pad-x);
+  border-bottom: 1px solid var(--divider);
+  background: var(--color-paper);
+}
+
+.view-toolbar-spatial {
+  background: var(--color-paper-deep);
+}
+
+.view-toolbar-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--color-ink-800);
+}
+
+.view-toolbar-meta {
+  font-size: var(--text-micro);
+  font-weight: 500;
+  color: var(--color-ink-500);
+}
+
+.view-toolbar-spacer {
+  flex: 1;
+  min-width: var(--space-2);
+}
+
+.view-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.view-toolbar .filter-pills {
+  margin-left: auto;
+}
+
+.sticky-note-search-dim {
+  opacity: 0.32;
+  pointer-events: none;
+  filter: grayscale(0.35);
+}
+
+.map-node-search-dim,
+.map-scratch-search-dim {
+  opacity: 0.28;
+  pointer-events: none;
 }
 
 .view-header-top {
@@ -1640,7 +1699,7 @@ html[data-locale='en'] {
   min-height: 0;
 }
 
-.view-header-vault {
+.view-page-vault .view-toolbar {
   position: relative;
   z-index: 4;
 }
@@ -1695,7 +1754,7 @@ html[data-locale='en'] {
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
-  max-width: 14rem;
+  max-width: 16rem;
   color: var(--color-ink-500);
   text-align: center;
   pointer-events: none;
@@ -1706,6 +1765,20 @@ html[data-locale='en'] {
   margin: 0;
   font-size: var(--text-caption);
   line-height: 1.55;
+}
+
+.vault-empty-hint-detail {
+  font-size: var(--text-micro);
+  line-height: 1.5;
+  color: var(--color-ink-500);
+  opacity: 0.9;
+}
+
+.map-empty-hint-mode {
+  margin-top: var(--space-1);
+  font-size: var(--text-micro);
+  line-height: 1.5;
+  color: var(--color-ink-500);
 }
 
 .vault-board {
@@ -1969,35 +2042,233 @@ html[data-locale='en'] {
   align-items: center;
 }
 
-.map-add-scratch {
-  margin-left: var(--space-2);
+/* Wiki: bottom peek — graph stays full width (Notion center-peek / Roam highlight pattern) */
+.map-peek-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--page-pad-x);
+  border-top: 1px solid var(--border);
+  background: rgb(255 252 249 / 94%);
+  backdrop-filter: blur(8px);
+  animation: peek-up 0.2s var(--ease-out);
 }
 
-.map-scroll {
+.map-peek-hint {
+  flex-shrink: 0;
+  font-size: var(--text-micro);
+  font-weight: 500;
+  color: var(--color-ink-500);
+  white-space: nowrap;
+}
+
+.map-peek-dismiss {
+  flex-shrink: 0;
+  padding: 0.25rem;
+  color: var(--color-ink-500);
+  border-radius: var(--radius-sm);
+}
+
+.map-peek-dismiss:hover {
+  color: var(--color-ink-800);
+  background: rgb(28 25 23 / 5%);
+}
+
+.map-peek-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-ink-900);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-peek-summary {
+  margin: 0.15rem 0 0;
+  font-size: var(--text-micro);
+  line-height: 1.5;
+  color: var(--color-ink-600);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Wiki: center reader overlay — canvas not squeezed */
+.note-reader-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: rgb(28 25 23 / 22%);
+  backdrop-filter: blur(4px);
+  animation: fade-up 0.18s var(--ease-out);
+}
+
+.note-reader-overlay-panel {
+  width: min(36rem, 92vw);
+  max-height: min(88vh, 52rem);
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.note-preview-pane-center {
+  width: 100%;
+  max-height: min(88vh, 52rem);
+  border-left: none;
+  background: var(--color-paper);
+}
+
+.note-preview-pane-center .note-reader-scroll {
+  max-height: calc(min(88vh, 52rem) - 7.5rem);
+}
+
+/* Vault / thinking map: drawer over canvas — layout does not add preview-open */
+.note-reader-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  pointer-events: none;
+}
+
+.note-reader-drawer-scrim {
   flex: 1;
-  overflow: auto;
-  padding: var(--space-4);
+  min-width: 0;
+  border: none;
+  background: rgb(28 25 23 / 12%);
+  cursor: default;
+  pointer-events: auto;
+  animation: fade-in 0.16s var(--ease-out);
 }
 
-.map-scroll-thinking {
-  background:
-    radial-gradient(circle, rgb(28 25 23 / 4%) 1px, transparent 1px),
-    var(--color-paper-deep);
+.note-preview-pane-overlay {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--preview-w);
+  max-width: min(28rem, 90vw);
+  height: 100%;
+  min-height: 0;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 28px rgb(28 25 23 / 10%);
+  pointer-events: auto;
+  animation: drawer-in 0.22s var(--ease-out);
+}
+
+.note-preview-pane-overlay .note-reader-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes peek-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.map-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  cursor: default;
+}
+
+.map-viewport-panning {
+  cursor: grabbing;
+}
+
+.map-viewport-thinking {
+  background-color: var(--color-paper-deep);
+  background-image: radial-gradient(circle, rgb(28 25 23 / 5%) 1px, transparent 1px);
   background-size: 18px 18px;
 }
 
-.map-scroll-wiki {
-  background:
-    linear-gradient(rgb(106 158 196 / 4%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(106 158 196 / 4%) 1px, transparent 1px),
-    var(--color-sky-soft);
+.map-viewport-wiki {
+  background-color: var(--color-sky-soft);
+  background-image:
+    linear-gradient(rgb(106 158 196 / 5%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(106 158 196 / 5%) 1px, transparent 1px);
   background-size: 24px 24px;
+}
+
+.map-viewport-nav {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-3);
+  z-index: 3;
+  margin: 0;
+  max-width: 14rem;
+  font-size: var(--text-micro);
+  line-height: 1.45;
+  color: var(--color-ink-500);
+  text-align: right;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.map-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.map-canvas-tip {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  z-index: 2;
+  max-width: 18rem;
+  margin: 0;
+  padding: 0 var(--space-4);
+  font-size: var(--text-caption);
+  line-height: 1.55;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: var(--color-ink-500);
 }
 
 .map-canvas {
   position: relative;
-  min-width: 1400px;
-  min-height: 900px;
 }
 
 .map-node {
@@ -2019,8 +2290,17 @@ html[data-locale='en'] {
 }
 
 .map-node-selected {
-  border-color: rgb(106 158 196 / 45%);
-  box-shadow: var(--shadow-md);
+  border-color: rgb(106 158 196 / 55%);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 3px rgb(106 158 196 / 14%);
+}
+
+.map-viewport-wiki .map-node-selected {
+  border-color: rgb(106 158 196 / 60%);
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 4px rgb(106 158 196 / 18%);
 }
 
 .map-node-dot {

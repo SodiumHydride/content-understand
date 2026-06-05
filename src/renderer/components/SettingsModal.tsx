@@ -1,29 +1,60 @@
 import clsx from 'clsx'
-import { useState } from 'react'
+import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import type { BackendId } from '../stores/types'
 import type { AppLocale } from '../lib/i18n'
-import { rebuildIndex } from '../lib/sidecar'
+import { useEffect, useState } from 'react'
+import {
+  fetchRuntimeRecommend,
+  fetchRuntimeStatus,
+  fetchPresets,
+  rebuildIndex,
+  startRuntimeSetup,
+  type RuntimeRecommend,
+  type RuntimePreset
+} from '../lib/sidecar'
+import type { InferenceMode } from '../stores/types'
 
 type SettingsTab = 'general' | 'vault' | 'models' | 'advanced' | 'about'
 
 const tabs: SettingsTab[] = ['general', 'vault', 'models', 'advanced', 'about']
 
-const backends: BackendId[] = ['mimo', 'openai_compat', 'gemma']
+const backends: BackendId[] = ['openai_compat', 'local_server', 'mimo', 'gemini', 'claude']
+
+const modalityFields = [
+  ['videoBackend', 'videoModel', 'settings.videoBackend'],
+  ['imageBackend', 'imageModel', 'settings.imageBackend'],
+  ['audioBackend', 'audioModel', 'settings.audioBackend'],
+  ['articleBackend', 'articleModel', 'settings.articleBackend']
+] as const
 
 export function SettingsModal(): React.JSX.Element | null {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const open = useAppStore((s) => s.settingsOpen)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const settings = useAppStore((s) => s.settings)
   const updateSettings = useAppStore((s) => s.updateSettings)
   const applyLocale = useAppStore((s) => s.applyLocale)
+  const pushEngineConfig = useAppStore((s) => s.pushEngineConfig)
   const refreshLibrary = useAppStore((s) => s.refreshLibrary)
 
   const [tab, setTab] = useState<SettingsTab>('general')
   const [savedFlash, setSavedFlash] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [runtimeRec, setRuntimeRec] = useState<RuntimeRecommend | null>(null)
+  const [runtimeState, setRuntimeState] = useState<string>('')
+  const [presets, setPresets] = useState<RuntimePreset[]>([])
+
+  useEffect(() => {
+    if (!open || tab !== 'models') return
+    void fetchRuntimeRecommend().then(setRuntimeRec)
+    void fetchRuntimeStatus().then((s) => {
+      if (s && typeof s.state === 'string') setRuntimeState(s.state)
+    })
+    void fetchPresets().then(setPresets)
+  }, [open, tab])
 
   if (!open) return null
 
@@ -34,8 +65,21 @@ export function SettingsModal(): React.JSX.Element | null {
 
   const backendLabel = (id: BackendId): string => {
     if (id === 'mimo') return t('settings.backendMimo')
-    if (id === 'gemma') return t('settings.backendGemma')
+    if (id === 'gemini') return t('settings.backendGemini')
+    if (id === 'claude') return t('settings.backendClaude')
+    if (id === 'local_server') return t('settings.backendLocal')
     return t('settings.backendOpenAI')
+  }
+
+  const persist = async (): Promise<void> => {
+    setSaveError(null)
+    const ok = await pushEngineConfig()
+    if (ok === false) {
+      setSaveError(t('settings.saveFailed'))
+      return
+    }
+    save()
+    setSettingsOpen(false)
   }
 
   return (
@@ -54,7 +98,7 @@ export function SettingsModal(): React.JSX.Element | null {
             <button
               key={id}
               type="button"
-              onClick={() => setTab(id)}
+              onClick={() => { setTab(id); setSaveError(null) }}
               className={clsx(
                 'settings-nav-btn',
                 tab === id && 'settings-nav-btn-active'
@@ -101,26 +145,29 @@ export function SettingsModal(): React.JSX.Element | null {
               <div className="space-y-4">
                 <p className="text-xs leading-relaxed text-ink-600">{t('settings.vaultHint')}</p>
                 <Field label={t('settings.vaultPath')}>
-                  <div className="flex gap-2">
-                    <input
-                      value={settings.vaultPath}
-                      onChange={(e) => updateSettings({ vaultPath: e.target.value })}
-                      placeholder={t('settings.vaultPathPlaceholder')}
-                      className="settings-input flex-1 text-[12px]"
-                      style={{ fontFamily: 'var(--font-mono)' }}
-                    />
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const picked = await window.api.pickVault()
-                        if (picked) updateSettings({ vaultPath: picked })
-                      }}
-                      className="settings-btn-secondary shrink-0"
-                    >
-                      {t('settings.vaultPick')}
-                    </button>
-                  </div>
+                  <input
+                    readOnly
+                    value={settings.vaultPath}
+                    className="settings-input text-[12px] opacity-90"
+                    style={{ fontFamily: 'var(--font-mono)' }}
+                  />
                 </Field>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void window.api.openVaultRoot()}
+                    className="settings-btn-secondary"
+                  >
+                    {t('settings.vaultOpen')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void window.api.exportVault()}
+                    className="settings-btn-secondary"
+                  >
+                    {t('settings.vaultExportAll')}
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={async () => {
@@ -138,6 +185,78 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {tab === 'models' && (
               <div className="space-y-4">
+                <p className="text-xs leading-relaxed text-ink-600">{t('settings.modelsHint')}</p>
+                <Field label={t('settings.inferenceMode')}>
+                  <select
+                    value={settings.inferenceMode}
+                    onChange={(e) =>
+                      updateSettings({ inferenceMode: e.target.value as InferenceMode })
+                    }
+                    className="settings-input"
+                  >
+                    <option value="prefer_api">{t('settings.inferencePreferApi')}</option>
+                    <option value="prefer_local">{t('settings.inferencePreferLocal')}</option>
+                    <option value="local_only">{t('settings.inferenceLocalOnly')}</option>
+                    <option value="api_only">{t('settings.inferenceApiOnly')}</option>
+                  </select>
+                </Field>
+                {runtimeRec && (
+                  <div className="rounded-lg border border-[var(--divider)] bg-paper-deep/40 p-3 text-[11px] leading-relaxed text-ink-700">
+                    <pre className="whitespace-pre-wrap font-sans">
+                      {i18n.language.startsWith('zh')
+                        ? runtimeRec.summary_zh
+                        : runtimeRec.summary_en}
+                    </pre>
+                    <p className="mt-2 text-ink-600">
+                      {t('settings.runtimeState')}: {runtimeState || 'idle'}
+                    </p>
+                  </div>
+                )}
+                {presets.length > 0 && (
+                  <Field label={t('settings.localPreset')}>
+                    <select
+                      value={settings.localPresetId || runtimeRec?.recommended_preset_id || ''}
+                      onChange={(e) => updateSettings({ localPresetId: e.target.value })}
+                      className="settings-input"
+                    >
+                      {presets.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {i18n.language.startsWith('zh') ? p.label_zh : p.label_en} ({p.download_size_gb} GB)
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="settings-btn-secondary"
+                    onClick={async () => {
+                      updateSettings({ localEngineConfirmed: true })
+                      const pid = settings.localPresetId || runtimeRec?.recommended_preset_id || null
+                      await startRuntimeSetup(pid, settings.useOllamaIfAvailable)
+                      save()
+                    }}
+                  >
+                    {t('settings.prepareLocalEngine')}
+                  </button>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-ink-700">
+                  <input
+                    type="checkbox"
+                    checked={settings.useOllamaIfAvailable}
+                    onChange={(e) => updateSettings({ useOllamaIfAvailable: e.target.checked })}
+                  />
+                  {t('settings.useOllamaIfAvailable')}
+                </label>
+                <label className="flex items-center gap-2 text-xs text-ink-700">
+                  <input
+                    type="checkbox"
+                    checked={settings.autoStartLocal}
+                    onChange={(e) => updateSettings({ autoStartLocal: e.target.checked })}
+                  />
+                  {t('settings.autoStartLocal')}
+                </label>
                 <Field label={t('settings.apiBase')}>
                   <input
                     value={settings.apiBase}
@@ -155,29 +274,53 @@ export function SettingsModal(): React.JSX.Element | null {
                     className="settings-input"
                   />
                 </Field>
-                {(
-                  [
-                    ['videoBackend', 'settings.videoBackend'],
-                    ['imageBackend', 'settings.imageBackend'],
-                    ['audioBackend', 'settings.audioBackend'],
-                    ['articleBackend', 'settings.articleBackend']
-                  ] as const
-                ).map(([key, labelKey]) => (
-                  <Field key={key} label={t(labelKey)}>
-                    <select
-                      value={settings[key]}
-                      onChange={(e) =>
-                        updateSettings({ [key]: e.target.value as BackendId })
-                      }
-                      className="settings-input"
-                    >
-                      {backends.map((b) => (
-                        <option key={b} value={b}>
-                          {backendLabel(b)}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                <Field label={t('settings.mimoKeys')}>
+                  <input
+                    type="password"
+                    value={settings.mimoKeys}
+                    onChange={(e) => updateSettings({ mimoKeys: e.target.value })}
+                    placeholder={t('settings.mimoKeysPlaceholder')}
+                    className="settings-input text-[12px]"
+                    style={{ fontFamily: 'var(--font-mono)' }}
+                  />
+                </Field>
+                <Field label={t('settings.geminiKeys')}>
+                  <input
+                    type="password"
+                    value={settings.geminiKeys}
+                    onChange={(e) => updateSettings({ geminiKeys: e.target.value })}
+                    placeholder={t('settings.geminiKeysPlaceholder')}
+                    className="settings-input text-[12px]"
+                    style={{ fontFamily: 'var(--font-mono)' }}
+                  />
+                </Field>
+                {modalityFields.map(([backendKey, modelKey, labelKey]) => (
+                  <div key={backendKey} className="space-y-2 rounded-lg border border-[var(--divider)] p-3">
+                    <Field label={t(labelKey)}>
+                      <select
+                        value={settings[backendKey]}
+                        onChange={(e) =>
+                          updateSettings({ [backendKey]: e.target.value as BackendId })
+                        }
+                        className="settings-input"
+                      >
+                        {backends.map((b) => (
+                          <option key={b} value={b}>
+                            {backendLabel(b)}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label={t('settings.modelName')}>
+                      <input
+                        value={settings[modelKey]}
+                        onChange={(e) => updateSettings({ [modelKey]: e.target.value })}
+                        placeholder={t('settings.modelNamePlaceholder')}
+                        className="settings-input text-[12px]"
+                        style={{ fontFamily: 'var(--font-mono)' }}
+                      />
+                    </Field>
+                  </div>
                 ))}
               </div>
             )}
@@ -193,13 +336,30 @@ export function SettingsModal(): React.JSX.Element | null {
                 </Field>
                 <Field label={t('settings.cacheDir')}>
                   <input
+                    readOnly
                     value={settings.cacheDir}
-                    onChange={(e) => updateSettings({ cacheDir: e.target.value })}
-                    placeholder={t('settings.cacheDirPlaceholder')}
-                    className="settings-input text-[12px]"
+                    className="settings-input text-[12px] opacity-90"
                     style={{ fontFamily: 'var(--font-mono)' }}
                   />
                 </Field>
+                <Field label={t('settings.modelsDir')}>
+                  <input
+                    readOnly
+                    value={settings.modelsDir}
+                    className="settings-input text-[12px] opacity-90"
+                    style={{ fontFamily: 'var(--font-mono)' }}
+                  />
+                </Field>
+                <Field label={t('settings.huggingFaceModelId')}>
+                  <input
+                    value={settings.huggingFaceModelId}
+                    onChange={(e) => updateSettings({ huggingFaceModelId: e.target.value })}
+                    placeholder={t('settings.huggingFacePlaceholder')}
+                    className="settings-input"
+                    disabled
+                  />
+                </Field>
+                <p className="text-[11px] text-ink-600">{t('settings.huggingFaceSoon')}</p>
               </div>
             )}
 
@@ -209,13 +369,17 @@ export function SettingsModal(): React.JSX.Element | null {
                   {t('settings.aboutText')}
                 </p>
                 <p className="text-xs text-ink-600">
-                  {t('settings.version')}: 0.1.0
+                  {t('settings.version')}: 0.2.0
                 </p>
+                <DataManagement />
               </div>
             )}
           </div>
 
           <div className="flex items-center justify-end gap-2 border-t border-[var(--divider)] px-6 py-4">
+            {saveError && (
+              <span className="text-xs font-medium text-red-500">{saveError}</span>
+            )}
             {savedFlash && (
               <span className="text-xs font-medium text-accent">{t('settings.saved')}</span>
             )}
@@ -226,14 +390,7 @@ export function SettingsModal(): React.JSX.Element | null {
             >
               {t('settings.close')}
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                save()
-                setSettingsOpen(false)
-              }}
-              className="btn-primary"
-            >
+            <button type="button" onClick={() => void persist()} className="btn-primary">
               {t('settings.save')}
             </button>
           </div>
@@ -255,5 +412,46 @@ function Field({
       <span className="settings-field-label">{label}</span>
       {children}
     </label>
+  )
+}
+
+function DataManagement(): React.JSX.Element {
+  const { t } = useTranslation()
+  const [dataSize, setDataSize] = React.useState<number | null>(null)
+
+  React.useEffect(() => {
+    window.api.getDataSize().then(setDataSize).catch(() => {})
+  }, [])
+
+  const sizeStr =
+    dataSize !== null
+      ? dataSize > 1_073_741_824
+        ? `${(dataSize / 1_073_741_824).toFixed(1)} GB`
+        : `${(dataSize / 1_048_576).toFixed(0)} MB`
+      : '...'
+
+  return (
+    <div className="mt-4 space-y-3 rounded-lg border border-[var(--divider)] p-4">
+      <p className="text-sm font-medium text-ink-900">{t('settings.dataManagement')}</p>
+      <p className="text-xs text-ink-600">
+        {t('settings.dataSize')}: {sizeStr}
+      </p>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          className="settings-btn-secondary"
+          onClick={() => window.api.openDataFolder()}
+        >
+          {t('settings.openDataFolder')}
+        </button>
+        <button
+          type="button"
+          className="settings-btn-secondary text-red-500"
+          onClick={() => window.api.deleteAllData()}
+        >
+          {t('settings.deleteAllData')}
+        </button>
+      </div>
+    </div>
   )
 }
