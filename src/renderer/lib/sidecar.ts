@@ -336,3 +336,102 @@ export async function exportCookies(browser: string): Promise<CookiesExportResul
     return { ok: false, error: 'Request failed' }
   }
 }
+
+// ── Ollama management ──
+
+export interface OllamaStatus {
+  installed: boolean
+  binary_path: string | null
+  running: boolean
+  base_url: string | null
+  version: string | null
+  models: Array<{ name: string; size: number; modified_at: string }>
+}
+
+export interface OllamaModel {
+  name: string
+  size: number
+  modified_at: string
+  details?: { family: string; parameter_size: string; quantization: string }
+}
+
+export async function fetchOllamaStatus(): Promise<OllamaStatus | null> {
+  const base = await getBase()
+  if (!base) return null
+  try {
+    const r = await fetch(`${base}/v1/ollama/status`)
+    if (!r.ok) return null
+    return (await r.json()) as OllamaStatus
+  } catch {
+    return null
+  }
+}
+
+export async function downloadOllama(): Promise<{ ok: boolean; error?: string }> {
+  const base = await getBase()
+  if (!base) return { ok: false, error: 'Sidecar offline' }
+  try {
+    const r = await fetch(`${base}/v1/ollama/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true })
+    })
+    return (await r.json()) as { ok: boolean; error?: string }
+  } catch {
+    return { ok: false, error: 'Request failed' }
+  }
+}
+
+export async function startOllama(): Promise<{ ok: boolean; base_url?: string; error?: string }> {
+  const base = await getBase()
+  if (!base) return { ok: false, error: 'Sidecar offline' }
+  try {
+    const r = await fetch(`${base}/v1/ollama/start`, { method: 'POST' })
+    return (await r.json()) as { ok: boolean; base_url?: string; error?: string }
+  } catch {
+    return { ok: false, error: 'Request failed' }
+  }
+}
+
+export async function fetchOllamaModels(): Promise<OllamaModel[]> {
+  const base = await getBase()
+  if (!base) return []
+  try {
+    const r = await fetch(`${base}/v1/ollama/models`)
+    if (!r.ok) return []
+    const data = (await r.json()) as { models: OllamaModel[] }
+    return data.models ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function pullOllamaModel(name: string): Promise<{ ok: boolean; error?: string }> {
+  const base = await getBase()
+  if (!base) return { ok: false, error: 'Sidecar offline' }
+  try {
+    const r = await fetch(`${base}/v1/ollama/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    })
+    return (await r.json()) as { ok: boolean; error?: string }
+  } catch {
+    return { ok: false, error: 'Request failed' }
+  }
+}
+
+export async function deleteOllamaModel(name: string): Promise<boolean> {
+  const base = await getBase()
+  if (!base) return false
+  try {
+    const r = await fetch(`${base}/v1/ollama/models`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}

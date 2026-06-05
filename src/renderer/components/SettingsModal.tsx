@@ -24,6 +24,7 @@ import type { InferenceMode } from '../stores/types'
 import { Select, type SelectOption } from './Select'
 import { ProviderCard } from './ProviderCard'
 import { ModalityRouter } from './ModalityRouter'
+import { OllamaPanel } from './OllamaPanel'
 
 type SettingsTab = 'general' | 'vault' | 'models' | 'advanced' | 'about'
 
@@ -287,106 +288,8 @@ export function SettingsModal(): React.JSX.Element | null {
                   />
                 </Field>
 
-                {/* ── Local inference ── */}
-                <Section title={isZh ? '本地推理' : 'Local Inference'}>
-                  {runtimeRec && (
-                    <div className="rounded-lg border border-[var(--divider)] bg-paper-deep/40 p-3 text-[11px] leading-relaxed text-ink-700">
-                      <pre className="whitespace-pre-wrap font-sans">
-                        {isZh ? runtimeRec.summary_zh : runtimeRec.summary_en}
-                      </pre>
-                      <p className="mt-2 text-ink-600">
-                        {t('settings.runtimeState')}:{' '}
-                        {runtimeState === 'ready' ? (isZh ? '就绪 ✓' : 'Ready ✓')
-                          : runtimeState === 'working' ? (isZh ? '准备中...' : 'Working...')
-                          : runtimeState === 'error' ? (isZh ? '错误' : 'Error')
-                          : (isZh ? '空闲' : 'Idle')}
-                      </p>
-                    </div>
-                  )}
-                  {presetOptions.length > 0 && (
-                    <Field label={t('settings.localPreset')}>
-                      <Select
-                        value={effectivePresetId}
-                        options={presetOptions}
-                        onChange={(v) => updateSettings({ localPresetId: v })}
-                        compact
-                      />
-                    </Field>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="settings-btn-secondary"
-                      disabled={runtimeState === 'working'}
-                      onClick={async () => {
-                        const pid = settings.localPresetId || runtimeRec?.recommended_preset_id || null
-                        await startRuntimeSetup(pid, settings.useOllamaIfAvailable)
-                        setRuntimeState('working')
-                        setRuntimeProgress({ percent: 5, message: isZh ? '启动中...' : 'Starting...' })
-                        startPolling()
-                      }}
-                    >
-                      {runtimeState === 'working'
-                        ? (isZh ? '准备中...' : 'Preparing...')
-                        : t('settings.prepareLocalEngine')}
-                    </button>
-                  </div>
-
-                  {/* Progress display */}
-                  {runtimeState === 'working' && runtimeProgress && (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-ink-600">{runtimeProgress.message}</span>
-                        <span className="text-ink-500">{runtimeProgress.percent}%</span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-shelf)]">
-                        <div
-                          className="h-full rounded-full bg-[var(--color-accent)] transition-all duration-300"
-                          style={{ width: `${Math.max(2, runtimeProgress.percent)}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  {runtimeState === 'ready' && (
-                    <div className="flex items-center gap-2 text-[12px] font-medium text-[var(--color-accent)]">
-                      <span>✓</span>
-                      <span>{isZh ? '本地引擎就绪' : 'Local engine ready'}</span>
-                      {runtimeProgress?.message && (
-                        <span className="text-ink-500">· {runtimeProgress.message}</span>
-                      )}
-                    </div>
-                  )}
-                  {runtimeState === 'error' && (
-                    <p className="text-[12px] text-[var(--color-danger)]">
-                      {isZh ? '启动失败，请检查日志' : 'Setup failed, check logs'}
-                    </p>
-                  )}
-                  <label className="flex items-center gap-2 text-xs text-ink-700">
-                    <input
-                      type="checkbox"
-                      checked={settings.useOllamaIfAvailable}
-                      onChange={(e) => updateSettings({ useOllamaIfAvailable: e.target.checked })}
-                    />
-                    {t('settings.useOllamaIfAvailable')}
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-ink-700">
-                    <input
-                      type="checkbox"
-                      checked={settings.autoStartLocal}
-                      onChange={(e) => updateSettings({ autoStartLocal: e.target.checked })}
-                    />
-                    {t('settings.autoStartLocal')}
-                  </label>
-
-                  {/* Downloaded models */}
-                  <ModelManager
-                    models={downloaded}
-                    totalSize={totalSize}
-                    deleting={deleting}
-                    onDelete={handleDeleteModel}
-                    isZh={isZh}
-                  />
-                </Section>
+                {/* ── Local inference (Ollama) ── */}
+                <OllamaPanel isZh={isZh} />
 
                 {/* ── Cloud Providers ── */}
                 <Section title={isZh ? '云端 Provider' : 'Cloud Providers'}>

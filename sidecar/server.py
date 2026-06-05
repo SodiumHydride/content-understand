@@ -478,6 +478,141 @@ def export_cookies(body: CookiesExportPayload):
         return {"ok": False, "error": str(exc)[:500]}
 
 
+# ── Ollama management ──
+
+
+@app.get("/v1/ollama/status")
+def ollama_status():
+    """Check Ollama availability: installed, running, version."""
+    from engine.paths import app_data_root
+    from engine.runtime.ollama_api import get_version, list_models as ollama_list
+    from engine.runtime.ollama_manager import (
+        detect_existing_ollama,
+        find_ollama_binary,
+        is_ollama_installed,
+    )
+
+    runtime_dir = app_data_root() / "runtime"
+    installed = is_ollama_installed(runtime_dir)
+    binary = find_ollama_binary(runtime_dir)
+    existing = detect_existing_ollama()
+
+    result = {
+        "installed": installed,
+        "binary_path": str(binary) if binary else None,
+        "running": existing is not None,
+        "base_url": existing,
+        "version": None,
+        "models": [],
+    }
+
+    if existing:
+        result["version"] = get_version(existing)
+        result["models"] = ollama_list(existing)
+
+    return result
+
+
+class OllamaDownloadPayload(BaseModel):
+    confirm: bool = False
+
+
+@app.post("/v1/ollama/download")
+def ollama_download(body: OllamaDownloadPayload):
+    """Download Ollama binary to app data."""
+    if not body.confirm:
+        raise HTTPException(400, "confirm required")
+
+    from engine.paths import app_data_root
+    from engine.runtime.ollama_manager import download_ollama
+
+    runtime_dir = app_data_root() / "runtime"
+    try:
+        binary = download_ollama(runtime_dir)
+        return {"ok": True, "path": str(binary)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:500]}
+
+
+@app.post("/v1/ollama/start")
+def ollama_start():
+    """Start Ollama daemon."""
+    from engine.paths import app_data_root, models_dir
+    from engine.runtime.ollama_manager import OllamaDaemon, detect_existing_ollama
+
+    existing = detect_existing_ollama()
+    if existing:
+        return {"ok": True, "base_url": existing, "reused": True}
+
+    runtime_dir = app_data_root() / "runtime"
+    daemon = OllamaDaemon()
+    try:
+        base = daemon.start(runtime_dir, models_dir())
+        return {"ok": True, "base_url": base, "reused": False}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:500]}
+
+
+@app.post("/v1/ollama/stop")
+def ollama_stop():
+    """Stop Ollama daemon (only if we started it)."""
+    from engine.runtime.ollama_manager import OllamaDaemon
+
+    # For now, this is a no-op — we don't persist the daemon instance across requests.
+    # The daemon is managed by the sidecar process lifecycle.
+    return {"ok": True, "message": "Ollama will stop when the app exits"}
+
+
+@app.get("/v1/ollama/models")
+def ollama_models():
+    """List models available in Ollama."""
+    from engine.runtime.ollama_api import list_models as ollama_list
+    from engine.runtime.ollama_manager import detect_existing_ollama
+
+    base = detect_existing_ollama()
+    if not base:
+        return {"models": [], "error": "Ollama not running"}
+
+    models = ollama_list(base)
+    return {"models": models}
+
+
+class OllamaPullPayload(BaseModel):
+    name: str
+
+
+@app.post("/v1/ollama/pull")
+def ollama_pull(body: OllamaPullPayload):
+    """Pull a model from Ollama registry."""
+    from engine.runtime.ollama_api import pull_model as ollama_pull_model
+    from engine.runtime.ollama_manager import detect_existing_ollama
+
+    base = detect_existing_ollama()
+    if not base:
+        raise HTTPException(400, "Ollama not running")
+
+    ok = ollama_pull_model(base, body.name)
+    return {"ok": ok, "name": body.name}
+
+
+class OllamaDeletePayload(BaseModel):
+    name: str
+
+
+@app.delete("/v1/ollama/models")
+def ollama_delete_model(body: OllamaDeletePayload):
+    """Delete a model from Ollama."""
+    from engine.runtime.ollama_api import delete_model as ollama_delete
+    from engine.runtime.ollama_manager import detect_existing_ollama
+
+    base = detect_existing_ollama()
+    if not base:
+        raise HTTPException(400, "Ollama not running")
+
+    ok = ollama_delete(base, body.name)
+    return {"ok": ok, "name": body.name}
+
+
 @app.get("/v1/library")
 def library(include_body: bool = False):
     """List all pages. Pass ?include_body=true to include full markdown body."""
