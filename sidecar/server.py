@@ -40,6 +40,12 @@ except ImportError:
 async def lifespan(app: FastAPI):
     ensure_app_dirs()
     yield
+    # Graceful shutdown: stop llama-server before sidecar exits
+    try:
+        from engine.runtime.manager import get_runtime_manager
+        get_runtime_manager().shutdown()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="Content Understand Sidecar", version="0.2.0", lifespan=lifespan)
@@ -255,7 +261,7 @@ def runtime_auto_detect():
         rt.mark_ollama_ready(ollama["base_url"])
         return {"backend": "ollama", "url": ollama["base_url"], "state": "ready"}
 
-    # Check if GGUF already downloaded
+    # Check if GGUF already downloaded — don't auto-start, let on-demand handle it
     from engine.paths import models_dir
     from engine.runtime.download import preset_model_paths
     from engine.runtime.presets import recommend_preset
@@ -263,9 +269,12 @@ def runtime_auto_detect():
     preset = recommend_preset(rt.hardware)
     main_gguf, mmproj = preset_model_paths(preset, models_dir())
     if main_gguf and main_gguf.exists():
-        # Model exists, start server in background
-        rt.setup_async(preset["id"], prefer_ollama=False)
-        return {"backend": "llama_server", "state": "starting", "preset": preset["id"]}
+        return {
+            "backend": "llama_server",
+            "state": "available",
+            "preset": preset["id"],
+            "hardware": rt.hardware.to_dict() if rt.hardware else None,
+        }
 
     # Nothing available
     rt.mark_idle()

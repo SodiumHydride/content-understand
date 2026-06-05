@@ -32,6 +32,7 @@ def _ensure_local_ready(
     rt = get_runtime_manager()
 
     if rt.state == "ready" and rt.local_base_url:
+        rt.touch()
         return rt.local_base_url
 
     if rt.state == "working":

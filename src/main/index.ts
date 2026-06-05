@@ -47,8 +47,14 @@ function startSidecar(): void {
 
 function stopSidecar(): void {
   if (sidecarProcess) {
-    sidecarProcess.kill()
+    // Send SIGTERM first so sidecar can gracefully stop llama-server
+    sidecarProcess.kill('SIGTERM')
+    const proc = sidecarProcess
     sidecarProcess = null
+    // Force kill after 5s if it hasn't exited
+    setTimeout(() => {
+      try { proc.kill('SIGKILL') } catch { /* already dead */ }
+    }, 5000)
   }
 }
 

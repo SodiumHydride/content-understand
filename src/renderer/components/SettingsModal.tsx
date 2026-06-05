@@ -279,6 +279,7 @@ export function SettingsModal(): React.JSX.Element | null {
                       value={settings.localPresetId || runtimeRec?.recommended_preset_id || ''}
                       options={presetOptions}
                       onChange={(v) => updateSettings({ localPresetId: v })}
+                      compact
                     />
                   </Field>
                 )}

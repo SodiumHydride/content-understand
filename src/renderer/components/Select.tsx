@@ -16,6 +16,7 @@ interface SelectProps {
   placeholder?: string
   className?: string
   disabled?: boolean
+  compact?: boolean
 }
 
 export function Select({
@@ -24,7 +25,8 @@ export function Select({
   onChange,
   placeholder,
   className,
-  disabled
+  disabled,
+  compact
 }: SelectProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false)
   const ref = React.useRef<HTMLDivElement>(null)
@@ -68,6 +70,7 @@ export function Select({
         onClick={() => setOpen(!open)}
         className={clsx(
           'settings-input flex w-full items-center justify-between gap-2 text-left',
+          compact && 'py-[0.35rem] text-[12px]',
           open && 'border-[var(--color-accent)]'
         )}
       >
@@ -85,7 +88,10 @@ export function Select({
 
       {open && (
         <div
-          className="absolute left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border)] bg-white py-1 shadow-md"
+          className={clsx(
+            'absolute left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border)] bg-white py-1 shadow-md',
+            compact && 'max-h-56'
+          )}
           role="listbox"
         >
           {Array.from(groups.entries()).map(([group, opts]) => (
@@ -107,7 +113,8 @@ export function Select({
                     setOpen(false)
                   }}
                   className={clsx(
-                    'flex w-full items-center px-3 py-1.5 text-left text-[var(--text-caption)] transition-colors',
+                    'flex w-full items-center px-3 text-left transition-colors',
+                    compact ? 'py-1 text-[12px]' : 'py-1.5 text-[var(--text-caption)]',
                     opt.value === value
                       ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
                       : 'text-ink-800 hover:bg-[var(--color-shelf)]',

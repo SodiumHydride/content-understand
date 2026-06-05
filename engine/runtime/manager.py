@@ -32,6 +32,8 @@ _manager: RuntimeManager | None = None
 
 
 class RuntimeManager:
+    IDLE_TIMEOUT_SECONDS = 600  # 10 minutes
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._state: str = "idle"  # idle | working | ready | error
@@ -47,6 +49,10 @@ class RuntimeManager:
         self._status_cache: dict[str, Any] | None = None
         self._status_cache_ts: float = 0
         self._status_cache_ttl: float = 30.0
+        self._last_activity: float = _time_mod.monotonic()
+        self._idle_checker: threading.Thread | None = None
+        self._stop_event = threading.Event()
+        self._start_idle_checker()
 
     def _set_state(
         self,
@@ -127,6 +133,29 @@ class RuntimeManager:
     def mark_idle(self) -> None:
         self._set_state(state="idle")
         self._invalidate_status_cache()
+
+    def touch(self) -> None:
+        """Update last activity timestamp. Call before each inference request."""
+        self._last_activity = _time_mod.monotonic()
+
+    def _start_idle_checker(self) -> None:
+        """Background thread that stops llama-server after idle timeout."""
+        def _loop() -> None:
+            while not self._stop_event.wait(timeout=30):
+                snap = self._get_state()
+                if snap["state"] != "ready" or snap["backend"] == "ollama":
+                    continue
+                elapsed = _time_mod.monotonic() - self._last_activity
+                if elapsed > self.IDLE_TIMEOUT_SECONDS:
+                    logger.info(
+                        "Idle for %.0fs (timeout=%ds), stopping llama-server",
+                        elapsed,
+                        self.IDLE_TIMEOUT_SECONDS,
+                    )
+                    self.stop()
+
+        self._idle_checker = threading.Thread(target=_loop, daemon=True, name="rt-idle-check")
+        self._idle_checker.start()
 
     def status(self) -> dict[str, Any]:
         now = _time_mod.monotonic()
@@ -270,6 +299,11 @@ class RuntimeManager:
             message="stopped",
         )
         self._invalidate_status_cache()
+
+    def shutdown(self) -> None:
+        """Clean stop for app exit. Stops server and idle checker."""
+        self._stop_event.set()
+        self.stop()
 
     def resolve_local_base_url(self, inference_mode: str) -> str | None:
         """Return injected OpenAI-compatible base URL if local should be used."""
