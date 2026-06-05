@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { X } from 'lucide-react'
+import { HardDrive, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import type { BackendId } from '../stores/types'
 import type { AppLocale } from '../lib/i18n'
@@ -12,10 +12,14 @@ import {
   fetchPresets,
   rebuildIndex,
   startRuntimeSetup,
+  fetchDownloadedModels,
+  deleteModel,
   type RuntimeRecommend,
-  type RuntimePreset
+  type RuntimePreset,
+  type DownloadedModel
 } from '../lib/sidecar'
 import type { InferenceMode } from '../stores/types'
+import { Select, type SelectOption } from './Select'
 
 type SettingsTab = 'general' | 'vault' | 'models' | 'advanced' | 'about'
 
@@ -30,8 +34,23 @@ const modalityFields = [
   ['articleBackend', 'articleModel', 'settings.articleBackend']
 ] as const
 
+const TIER_LABELS: Record<string, { zh: string; en: string }> = {
+  ultra_lite: { zh: '极轻量', en: 'Ultra Lite' },
+  cpu_lite: { zh: 'CPU 轻量', en: 'CPU Lite' },
+  cpu_balanced: { zh: 'CPU 均衡', en: 'CPU Balanced' },
+  balanced: { zh: '均衡', en: 'Balanced' },
+  quality: { zh: '高质量', en: 'Quality' },
+  high_quality: { zh: '旗舰', en: 'Flagship' }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
+  return `${(bytes / 1_048_576).toFixed(0)} MB`
+}
+
 export function SettingsModal(): React.JSX.Element | null {
   const { t, i18n } = useTranslation()
+  const isZh = i18n.language.startsWith('zh')
   const open = useAppStore((s) => s.settingsOpen)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const settings = useAppStore((s) => s.settings)
@@ -46,6 +65,9 @@ export function SettingsModal(): React.JSX.Element | null {
   const [runtimeRec, setRuntimeRec] = useState<RuntimeRecommend | null>(null)
   const [runtimeState, setRuntimeState] = useState<string>('')
   const [presets, setPresets] = useState<RuntimePreset[]>([])
+  const [downloaded, setDownloaded] = useState<DownloadedModel[] | null>(null)
+  const [totalSize, setTotalSize] = useState(0)
+  const [deleting, setDeleting] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open || tab !== 'models') return
@@ -54,6 +76,12 @@ export function SettingsModal(): React.JSX.Element | null {
       if (s && typeof s.state === 'string') setRuntimeState(s.state)
     })
     void fetchPresets().then(setPresets)
+    void fetchDownloadedModels().then((r) => {
+      if (r) {
+        setDownloaded(r.models)
+        setTotalSize(r.total_size_bytes)
+      }
+    })
   }, [open, tab])
 
   if (!open) return null
@@ -69,6 +97,46 @@ export function SettingsModal(): React.JSX.Element | null {
     if (id === 'claude') return t('settings.backendClaude')
     if (id === 'local_server') return t('settings.backendLocal')
     return t('settings.backendOpenAI')
+  }
+
+  const backendOptions: SelectOption[] = backends.map((b) => ({
+    value: b,
+    label: backendLabel(b)
+  }))
+
+  const localeOptions: SelectOption[] = [
+    { value: 'system', label: t('settings.languageSystem') },
+    { value: 'zh', label: t('settings.languageZh') },
+    { value: 'en', label: t('settings.languageEn') }
+  ]
+
+  const inferenceOptions: SelectOption[] = [
+    { value: 'prefer_api', label: t('settings.inferencePreferApi') },
+    { value: 'prefer_local', label: t('settings.inferencePreferLocal') },
+    { value: 'local_only', label: t('settings.inferenceLocalOnly') },
+    { value: 'api_only', label: t('settings.inferenceApiOnly') }
+  ]
+
+  // Group presets by tier
+  const presetOptions: SelectOption[] = presets.map((p) => ({
+    value: p.id,
+    label: `${isZh ? p.label_zh : p.label_en} (${p.download_size_gb} GB)`,
+    group: isZh
+      ? (TIER_LABELS[p.tier]?.zh ?? p.tier)
+      : (TIER_LABELS[p.tier]?.en ?? p.tier)
+  }))
+
+  const handleDeleteModel = async (filename: string): Promise<void> => {
+    setDeleting(filename)
+    const ok = await deleteModel(filename)
+    if (ok) {
+      setDownloaded((prev) => prev?.filter((m) => m.filename !== filename) ?? null)
+      setTotalSize((prev) => {
+        const found = downloaded?.find((m) => m.filename === filename)
+        return prev - (found?.size_bytes ?? 0)
+      })
+    }
+    setDeleting(null)
   }
 
   const persist = async (): Promise<void> => {
@@ -125,18 +193,14 @@ export function SettingsModal(): React.JSX.Element | null {
             {tab === 'general' && (
               <div className="space-y-4">
                 <Field label={t('settings.language')}>
-                  <select
+                  <Select
                     value={settings.locale}
-                    onChange={(e) => {
-                      updateSettings({ locale: e.target.value as AppLocale })
+                    options={localeOptions}
+                    onChange={(v) => {
+                      updateSettings({ locale: v as AppLocale })
                       applyLocale()
                     }}
-                    className="settings-input"
-                  >
-                    <option value="system">{t('settings.languageSystem')}</option>
-                    <option value="zh">{t('settings.languageZh')}</option>
-                    <option value="en">{t('settings.languageEn')}</option>
-                  </select>
+                  />
                 </Field>
               </div>
             )}
@@ -184,49 +248,41 @@ export function SettingsModal(): React.JSX.Element | null {
             )}
 
             {tab === 'models' && (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 <p className="text-xs leading-relaxed text-ink-600">{t('settings.modelsHint')}</p>
+
+                {/* ── Inference mode ── */}
                 <Field label={t('settings.inferenceMode')}>
-                  <select
+                  <Select
                     value={settings.inferenceMode}
-                    onChange={(e) =>
-                      updateSettings({ inferenceMode: e.target.value as InferenceMode })
-                    }
-                    className="settings-input"
-                  >
-                    <option value="prefer_api">{t('settings.inferencePreferApi')}</option>
-                    <option value="prefer_local">{t('settings.inferencePreferLocal')}</option>
-                    <option value="local_only">{t('settings.inferenceLocalOnly')}</option>
-                    <option value="api_only">{t('settings.inferenceApiOnly')}</option>
-                  </select>
+                    options={inferenceOptions}
+                    onChange={(v) => updateSettings({ inferenceMode: v as InferenceMode })}
+                  />
                 </Field>
+
+                {/* ── Hardware info ── */}
                 {runtimeRec && (
                   <div className="rounded-lg border border-[var(--divider)] bg-paper-deep/40 p-3 text-[11px] leading-relaxed text-ink-700">
                     <pre className="whitespace-pre-wrap font-sans">
-                      {i18n.language.startsWith('zh')
-                        ? runtimeRec.summary_zh
-                        : runtimeRec.summary_en}
+                      {isZh ? runtimeRec.summary_zh : runtimeRec.summary_en}
                     </pre>
                     <p className="mt-2 text-ink-600">
                       {t('settings.runtimeState')}: {runtimeState || 'idle'}
                     </p>
                   </div>
                 )}
-                {presets.length > 0 && (
+
+                {/* ── Preset selector (grouped by tier) ── */}
+                {presetOptions.length > 0 && (
                   <Field label={t('settings.localPreset')}>
-                    <select
+                    <Select
                       value={settings.localPresetId || runtimeRec?.recommended_preset_id || ''}
-                      onChange={(e) => updateSettings({ localPresetId: e.target.value })}
-                      className="settings-input"
-                    >
-                      {presets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {i18n.language.startsWith('zh') ? p.label_zh : p.label_en} ({p.download_size_gb} GB)
-                        </option>
-                      ))}
-                    </select>
+                      options={presetOptions}
+                      onChange={(v) => updateSettings({ localPresetId: v })}
+                    />
                   </Field>
                 )}
+
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -241,6 +297,7 @@ export function SettingsModal(): React.JSX.Element | null {
                     {t('settings.prepareLocalEngine')}
                   </button>
                 </div>
+
                 <label className="flex items-center gap-2 text-xs text-ink-700">
                   <input
                     type="checkbox"
@@ -257,6 +314,8 @@ export function SettingsModal(): React.JSX.Element | null {
                   />
                   {t('settings.autoStartLocal')}
                 </label>
+
+                {/* ── API credentials ── */}
                 <Field label={t('settings.apiBase')}>
                   <input
                     value={settings.apiBase}
@@ -294,22 +353,16 @@ export function SettingsModal(): React.JSX.Element | null {
                     style={{ fontFamily: 'var(--font-mono)' }}
                   />
                 </Field>
+
+                {/* ── Per-modality backend config ── */}
                 {modalityFields.map(([backendKey, modelKey, labelKey]) => (
                   <div key={backendKey} className="space-y-2 rounded-lg border border-[var(--divider)] p-3">
                     <Field label={t(labelKey)}>
-                      <select
+                      <Select
                         value={settings[backendKey]}
-                        onChange={(e) =>
-                          updateSettings({ [backendKey]: e.target.value as BackendId })
-                        }
-                        className="settings-input"
-                      >
-                        {backends.map((b) => (
-                          <option key={b} value={b}>
-                            {backendLabel(b)}
-                          </option>
-                        ))}
-                      </select>
+                        options={backendOptions}
+                        onChange={(v) => updateSettings({ [backendKey]: v as BackendId })}
+                      />
                     </Field>
                     <Field label={t('settings.modelName')}>
                       <input
@@ -322,6 +375,15 @@ export function SettingsModal(): React.JSX.Element | null {
                     </Field>
                   </div>
                 ))}
+
+                {/* ── Downloaded models manager ── */}
+                <ModelManager
+                  models={downloaded}
+                  totalSize={totalSize}
+                  deleting={deleting}
+                  onDelete={handleDeleteModel}
+                  isZh={isZh}
+                />
               </div>
             )}
 
@@ -412,6 +474,87 @@ function Field({
       <span className="settings-field-label">{label}</span>
       {children}
     </label>
+  )
+}
+
+function ModelManager({
+  models,
+  totalSize,
+  deleting,
+  onDelete,
+  isZh
+}: {
+  models: DownloadedModel[] | null
+  totalSize: number
+  deleting: string | null
+  onDelete: (filename: string) => void
+  isZh: boolean
+}): React.JSX.Element {
+  const { t } = useTranslation()
+
+  // Separate main models from mmproj files
+  const mainModels = models?.filter((m) => !m.is_mmproj) ?? []
+  const mmprojFiles = models?.filter((m) => m.is_mmproj) ?? []
+
+  return (
+    <div className="rounded-lg border border-[var(--divider)]">
+      <div className="flex items-center gap-2 border-b border-[var(--divider)] px-3 py-2.5">
+        <HardDrive size={14} className="text-ink-500" />
+        <span className="text-[12px] font-semibold text-ink-800">
+          {t('settings.downloadedModels')}
+        </span>
+        {models !== null && (
+          <span className="ml-auto text-[11px] text-ink-500">
+            {mainModels.length} {t('settings.models')}, {formatBytes(totalSize)}
+          </span>
+        )}
+      </div>
+
+      <div className="max-h-48 overflow-y-auto">
+        {models === null && (
+          <p className="px-3 py-4 text-center text-[11px] text-ink-500">...</p>
+        )}
+        {models !== null && models.length === 0 && (
+          <p className="px-3 py-4 text-center text-[11px] text-ink-500">
+            {t('settings.noModels')}
+          </p>
+        )}
+        {mainModels.map((m) => (
+          <div
+            key={m.filename}
+            className="flex items-center gap-3 border-b border-[var(--divider)] px-3 py-2 last:border-b-0"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[12px] font-medium text-ink-800">
+                {m.preset_label_zh && isZh
+                  ? m.preset_label_zh
+                  : m.preset_label_en ?? m.filename}
+              </p>
+              <p className="text-[10px] text-ink-500">
+                {formatBytes(m.size_bytes)}
+                {m.preset_id && ` · ${m.preset_id}`}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-ghost rounded p-1 text-ink-500 hover:text-[var(--color-danger)]"
+              disabled={deleting === m.filename}
+              onClick={() => onDelete(m.filename)}
+              title={t('settings.deleteModel')}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+        {mmprojFiles.length > 0 && (
+          <div className="border-t border-[var(--divider)] px-3 py-1.5 text-[10px] text-ink-500">
+            + {mmprojFiles.length} mmproj {t('settings.files')} ({formatBytes(
+              mmprojFiles.reduce((s, m) => s + m.size_bytes, 0)
+            )})
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

@@ -231,3 +231,43 @@ export async function autoDetectRuntime(): Promise<RuntimeAutoDetect | null> {
     return null
   }
 }
+
+// ── Local model management ──
+
+export interface DownloadedModel {
+  filename: string
+  path: string
+  size_bytes: number
+  preset_id: string | null
+  preset_label_zh: string | null
+  preset_label_en: string | null
+  is_mmproj: boolean
+}
+
+export interface ModelsResponse {
+  models: DownloadedModel[]
+  total_size_bytes: number
+}
+
+export async function fetchDownloadedModels(): Promise<ModelsResponse | null> {
+  const base = await getBase()
+  if (!base) return null
+  try {
+    const r = await fetch(`${base}/v1/models`)
+    if (!r.ok) return null
+    return (await r.json()) as ModelsResponse
+  } catch {
+    return null
+  }
+}
+
+export async function deleteModel(filename: string): Promise<boolean> {
+  const base = await getBase()
+  if (!base) return false
+  try {
+    const r = await fetch(`${base}/v1/models/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+    return r.ok
+  } catch {
+    return false
+  }
+}

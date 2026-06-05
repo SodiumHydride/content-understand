@@ -277,6 +277,93 @@ def runtime_auto_detect():
     }
 
 
+@app.get("/v1/models")
+def list_models():
+    """List downloaded local models with sizes."""
+    from engine.paths import models_dir
+    from engine.runtime.presets import load_presets
+
+    mdir = models_dir()
+    presets = load_presets()
+
+    # Map filename → preset info
+    file_to_preset: dict[str, dict] = {}
+    for p in presets:
+        for spec in p.get("files", []):
+            file_to_preset[spec["filename"]] = p
+
+    models = []
+    if mdir.exists():
+        for f in sorted(mdir.iterdir()):
+            if f.is_file() and f.suffix in (".gguf", ".bin"):
+                preset = file_to_preset.get(f.name)
+                models.append({
+                    "filename": f.name,
+                    "path": str(f),
+                    "size_bytes": f.stat().st_size,
+                    "preset_id": preset["id"] if preset else None,
+                    "preset_label_zh": preset.get("label_zh") if preset else None,
+                    "preset_label_en": preset.get("label_en") if preset else None,
+                    "is_mmproj": "mmproj" in f.name.lower(),
+                })
+            elif f.is_dir():
+                # hf_hub may nest in subdirectories
+                for sub in f.iterdir():
+                    if sub.is_file() and sub.suffix in (".gguf", ".bin"):
+                        preset = file_to_preset.get(sub.name)
+                        models.append({
+                            "filename": sub.name,
+                            "path": str(sub),
+                            "size_bytes": sub.stat().st_size,
+                            "preset_id": preset["id"] if preset else None,
+                            "preset_label_zh": preset.get("label_zh") if preset else None,
+                            "preset_label_en": preset.get("label_en") if preset else None,
+                            "is_mmproj": "mmproj" in sub.name.lower(),
+                        })
+
+    total = sum(m["size_bytes"] for m in models)
+    return {"models": models, "total_size_bytes": total}
+
+
+@app.delete("/v1/models/{filename:path}")
+def delete_model(filename: str):
+    """Delete a downloaded model file."""
+    from engine.paths import models_dir
+
+    mdir = models_dir()
+    target = mdir / filename
+
+    # Security: prevent path traversal
+    try:
+        target = target.resolve()
+        mdir_resolved = mdir.resolve()
+        if not str(target).startswith(str(mdir_resolved)):
+            raise HTTPException(status_code=400, detail="Invalid path")
+    except (ValueError, OSError):
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    if not target.exists():
+        # Try subdirectories
+        found = None
+        for f in mdir.rglob(filename):
+            if f.is_file():
+                found = f
+                break
+        if found:
+            target = found
+        else:
+            raise HTTPException(status_code=404, detail="File not found")
+
+    size = target.stat().st_size
+    target.unlink()
+    # Remove parent dir if empty (for hf_hub nested structure)
+    parent = target.parent
+    if parent != mdir and not any(parent.iterdir()):
+        parent.rmdir()
+
+    return {"deleted": filename, "size_bytes": size}
+
+
 @app.get("/v1/library")
 def library(include_body: bool = False):
     """List all pages. Pass ?include_body=true to include full markdown body."""
