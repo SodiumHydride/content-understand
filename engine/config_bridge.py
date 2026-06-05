@@ -5,6 +5,16 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from content_understand.defaults import (
+    CLAUDE_API_BASE,
+    CLAUDE_DEFAULT_MODEL,
+    GEMINI_DEFAULT_MODEL,
+    LOCAL_SERVER_DEFAULT_MODEL,
+    MIMO_API_BASE,
+    MIMO_DEFAULT_MODEL,
+    OLLAMA_BASE_URL,
+    OPENAI_COMPAT_DEFAULT_MODEL,
+)
 from engine.paths import cache_dir, ensure_app_dirs
 from engine.understand.config import BackendConfig, ContentConfig
 
@@ -42,10 +52,10 @@ def settings_to_config(data: dict[str, Any]) -> ContentConfig:
             return BackendConfig(
                 type="mimo",
                 api_base=os.environ.get(
-                    "MIMO_API_BASE", api_base or "https://api.xiaomimimo.com/v1"
+                    "MIMO_API_BASE", api_base or MIMO_API_BASE
                 ),
                 api_keys=keys,
-                model=model or "mimo-v2.5",
+                model=model or MIMO_DEFAULT_MODEL,
             )
 
         if backend_id == "gemini":
@@ -63,23 +73,23 @@ def settings_to_config(data: dict[str, Any]) -> ContentConfig:
             return BackendConfig(
                 type="gemini",
                 api_keys=keys,
-                model=model or "gemini-2.5-flash",
+                model=model or GEMINI_DEFAULT_MODEL,
             )
 
         if backend_id == "claude":
             return BackendConfig(
                 type="claude",
-                api_base=api_base or "https://api.anthropic.com",
+                api_base=api_base or CLAUDE_API_BASE,
                 api_keys=[api_key] if api_key else [],
-                model=model or "claude-sonnet-4-6",
+                model=model or CLAUDE_DEFAULT_MODEL,
             )
 
         if backend_id == "local_server":
-            base = (local_base or "http://127.0.0.1:11434/v1").rstrip("/")
+            base = (local_base or f"{OLLAMA_BASE_URL}/v1").rstrip("/")
             if not base.endswith("/v1"):
                 base = f"{base}/v1"
             if not model:
-                model = "gemma"
+                model = LOCAL_SERVER_DEFAULT_MODEL
             return BackendConfig(
                 type="openai_compat",
                 api_base=base,
@@ -92,7 +102,7 @@ def settings_to_config(data: dict[str, Any]) -> ContentConfig:
             type="openai_compat",
             api_base=api_base,
             api_keys=[api_key] if api_key else [],
-            model=model or "gpt-4o-mini",
+            model=model or OPENAI_COMPAT_DEFAULT_MODEL,
         )
 
     # Build per-modality backend configs — each gets its own model name

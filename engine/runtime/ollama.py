@@ -8,9 +8,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from content_understand.defaults import OLLAMA_BASE_URL
+
 
 def ollama_base_url() -> str:
-    return os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+    return os.environ.get("OLLAMA_HOST", OLLAMA_BASE_URL).rstrip("/")
 
 
 def detect_ollama(timeout: float = 2.0) -> dict[str, Any]:

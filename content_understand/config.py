@@ -6,6 +6,8 @@ import tempfile
 
 from pydantic import BaseModel, Field
 
+from content_understand.defaults import BILIBILI_QUALITY_DEFAULT, WHISPER_DEFAULT_MODEL
+
 _DEFAULT_CACHE_DIR = tempfile.gettempdir() + "/content_understand_cache"
 
 
@@ -69,7 +71,7 @@ class ContentConfig(BaseModel):
 
     # -- Audio options --
     audio_use_whisper: bool = False
-    whisper_model: str = "large-v3"
+    whisper_model: str = WHISPER_DEFAULT_MODEL
 
     # -- Download options --
     cache_dir: str = _DEFAULT_CACHE_DIR
@@ -78,7 +80,7 @@ class ContentConfig(BaseModel):
 
     # -- Bilibili options --
     bilibili_cookies: str | None = None
-    bilibili_quality: int = 360
+    bilibili_quality: int = BILIBILI_QUALITY_DEFAULT
 
     # -- Video URL mode (MiMo specific) --
     enable_url_mode: bool = False

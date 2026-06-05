@@ -9,6 +9,7 @@ let mainWindow: BrowserWindow | null = null
 let sidecarProcess: ChildProcess | null = null
 let appPaths: AppDataPaths | null = null
 
+// Must match SIDECAR_PORT in content_understand/defaults.py
 const SIDECAR_PORT = 17890
 const SIDECAR_BASE = `http://127.0.0.1:${SIDECAR_PORT}`
 

@@ -7,11 +7,12 @@ import logging
 from pathlib import Path
 
 from content_understand._keys import KeyRotator, rotate_request
+from content_understand.defaults import GEMINI_API_BASE, GEMINI_DEFAULT_MODEL
 from content_understand.models.audio_base import AudioModel
 
 logger = logging.getLogger(__name__)
 
-_GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
+_GEMINI_API_BASE = GEMINI_API_BASE
 
 _DEFAULT_AUDIO_PROMPT = """请详细分析这段音频，按以下结构输出：
 
@@ -51,7 +52,7 @@ class GeminiAudioModel(AudioModel):
 
     def __init__(self, config) -> None:
         self.rotator = KeyRotator(config.api_keys or [])
-        self.model_name = config.audio_model or "gemini-2.5-flash"
+        self.model_name = config.audio_model or GEMINI_DEFAULT_MODEL
         self.timeout = config.timeout or 300
         self._url_factory = _gemini_url_factory(self.model_name)
 

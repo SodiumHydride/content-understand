@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 
 from content_understand._keys import KeyRotator, rotate_request
+from content_understand.defaults import MIMO_DEFAULT_MODEL
 from content_understand.models.image_base import ImageModel
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ class MimoImageModel(ImageModel):
     def __init__(self, config) -> None:
         self.api_base = config.api_base
         self.rotator = KeyRotator(config.api_keys or [])
-        self.model_name = config.image_model or "mimo-v2.5"
+        self.model_name = config.image_model or MIMO_DEFAULT_MODEL
         self.max_tokens = config.max_tokens
         self.timeout = config.timeout or 600
 

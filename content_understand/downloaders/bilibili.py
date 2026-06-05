@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 import requests
+import yt_dlp
 
+from content_understand.defaults import BILIBILI_QUALITY_DEFAULT
+from content_understand.downloaders._utils import parse_vtt, safe_int
 from content_understand.downloaders.base import Downloader, VideoInfo
 
 logger = logging.getLogger(__name__)
@@ -30,17 +33,35 @@ _REFERER = "https://www.bilibili.com/"
 _QUALITY_MAP = {"360p": 16, "480p": 32, "720p": 64, "1080p": 80}
 
 
+def _ydl_opts(**overrides) -> dict:
+    """Base yt-dlp options for Bilibili."""
+    base = {
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": 30,
+        "retries": 3,
+    }
+    base.update(overrides)
+    return base
+
+
 class BilibiliDownloader(Downloader):
-    """Download videos from Bilibili with 4-level strategy fallback."""
+    """Download videos from Bilibili with 4-level strategy fallback.
+
+    Strategy order:
+    1. yt-dlp (with cookies if provided)
+    2. yt-dlp (without cookies)
+    3. Bilibili DASH API + ffmpeg merge
+    4. Bilibili single-stream API
+    """
 
     def __init__(
         self,
         cookies_file: str | None = None,
-        quality: int = 32,
+        quality: int = BILIBILI_QUALITY_DEFAULT,
         max_retries: int = 3,
         request_timeout: int = 10,
         download_timeout: int = 600,
-        yt_dlp_path: str = "yt-dlp",
         ffmpeg_path: str = "ffmpeg",
     ) -> None:
         self.cookies_file = cookies_file
@@ -48,7 +69,6 @@ class BilibiliDownloader(Downloader):
         self.max_retries = max_retries
         self.request_timeout = request_timeout
         self.download_timeout = download_timeout
-        self.yt_dlp_path = yt_dlp_path
         self.ffmpeg_path = ffmpeg_path
         self._headers = {"User-Agent": _FULL_USER_AGENT, "Referer": _REFERER}
 
@@ -118,53 +138,173 @@ class BilibiliDownloader(Downloader):
         for lang in langs:
             with tempfile.TemporaryDirectory(prefix="bili_sub_") as tmpdir:
                 out_tpl = os.path.join(tmpdir, "sub")
-                proc = self._run_ytdlp(
-                    [
-                        "--write-auto-sub",
-                        "--sub-lang",
-                        lang,
-                        "--sub-format",
-                        "vtt",
-                        "--skip-download",
-                        "-o",
-                        out_tpl,
-                        url,
-                    ]
+                opts = _ydl_opts(
+                    outtmpl=out_tpl,
+                    writeautomaticsub=True,
+                    subtitleslangs=[lang],
+                    subtitlesformat="vtt",
+                    skip_download=True,
                 )
-                if proc.returncode != 0:
+                if self.cookies_file:
+                    opts["cookiefile"] = self.cookies_file
+                try:
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        ydl.extract_info(url, download=True)
+                except Exception:
+                    logger.debug("Subtitle extraction failed for lang=%s", lang, exc_info=True)
                     continue
+
                 vtt_files = list(Path(tmpdir).glob("*.vtt"))
                 if not vtt_files:
                     continue
-                text = _parse_vtt(vtt_files[0])
+                text = parse_vtt(vtt_files[0])
                 if text:
                     return text
         return None
 
-    # -- Private helpers (yt-dlp, DASH, single-stream, info) --
+    # ── yt-dlp library helpers ──────────────────────────────────────────────
+
+    def _get_info_ytdlp(self, url: str) -> VideoInfo:
+        opts = _ydl_opts(skip_download=True)
+        if self.cookies_file:
+            opts["cookiefile"] = self.cookies_file
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            data = ydl.extract_info(url, download=False)
+
+        if not data:
+            raise RuntimeError(f"yt-dlp returned no info for {url}")
+
+        extractor = data.get("extractor_key") or data.get("extractor") or ""
+        sub_langs: list[str] = []
+        for key in ("subtitles", "automatic_captions"):
+            if isinstance(data.get(key), dict):
+                sub_langs.extend(data[key].keys())
+        seen: set[str] = set()
+        unique_subs = [lang for lang in sub_langs if lang not in seen and not seen.add(lang)]
+        return VideoInfo(
+            url=url,
+            title=data.get("title", ""),
+            author=data.get("uploader") or data.get("channel") or "",
+            duration=safe_int(data.get("duration")),
+            description=data.get("description", ""),
+            upload_date=data.get("upload_date", ""),
+            platform=extractor or "BiliBili",
+            filesize=safe_int(data.get("filesize") or data.get("filesize_approx")),
+            format=data.get("format", ""),
+            subtitles=unique_subs,
+        )
 
     def _download_ytdlp(self, url: str, output_path: str, *, use_cookies: bool) -> str | None:
-        args = ["-f", "best[ext=mp4]/best", "--no-playlist", "-o", output_path, "--no-overwrites"]
-        if use_cookies and self.cookies_file:
-            args.extend(["--cookies", self.cookies_file])
-        args.append(url)
-
-        proc = self._run_ytdlp(args)
-        if proc.returncode != 0:
-            stderr = proc.stderr.strip()
-            if "has already been downloaded" in stderr and os.path.exists(output_path):
-                return output_path
-            raise RuntimeError(f"yt-dlp exited {proc.returncode}: {stderr}")
-
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            return output_path
-
+        uid = uuid.uuid4().hex[:8]
         parent = Path(output_path).parent
-        stem = Path(output_path).stem
+        outtmpl = str(parent / f"%(id)s_{uid}.%(ext)s")
+
+        opts = _ydl_opts(
+            outtmpl=outtmpl,
+            format="best[ext=mp4]/best",
+            merge_output_format="mp4",
+            no_playlist=True,
+            no_overwrites=True,
+        )
+        if use_cookies and self.cookies_file:
+            opts["cookiefile"] = self.cookies_file
+
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+
+        if not info:
+            raise RuntimeError(f"yt-dlp produced no info for {url}")
+
+        # Try canonical filename
+        filename = yt_dlp.YoutubeDL(opts).prepare_filename(info)
+        if os.path.exists(filename) and os.path.getsize(filename) > 0:
+            return filename
+
+        # Fallback: search by ID
+        video_id = info.get("id", "")
         for candidate in parent.iterdir():
-            if candidate.stem == stem and candidate.suffix in (".mp4", ".mkv", ".webm"):
+            if candidate.is_file() and video_id in candidate.name and candidate.suffix in (
+                ".mp4", ".mkv", ".webm",
+            ):
                 return str(candidate)
         return None
+
+    # ── Bilibili API fallback ───────────────────────────────────────────────
+
+    def _get_info_api(self, bvid: str) -> VideoInfo:
+        r = self._api_get(f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}")
+        data = r.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f"Bilibili API returned code={data.get('code')}: {data.get('message')}")
+        info = data["data"]
+        return VideoInfo(
+            url=f"https://www.bilibili.com/video/{bvid}/",
+            title=info.get("title", ""),
+            author=info.get("owner", {}).get("name", ""),
+            duration=safe_int(info.get("duration")),
+            description=info.get("desc", ""),
+            upload_date=str(info.get("pubdate", "")),
+            platform="BiliBili",
+        )
+
+    def _api_get(self, url: str) -> requests.Response:
+        r = requests.get(url, headers=self._headers, timeout=self.request_timeout)
+        if r.status_code != 200:
+            raise RuntimeError(f"Bilibili API HTTP {r.status_code} for {url}")
+        return r
+
+    def _get_cid(self, bvid: str) -> int | None:
+        try:
+            r = self._api_get(f"https://api.bilibili.com/x/player/pagelist?bvid={bvid}")
+            data = r.json()
+            pages = data.get("data")
+            if not pages:
+                raise RuntimeError(f"Empty pagelist for {bvid}")
+            cid = pages[0].get("cid")
+            if not cid:
+                raise RuntimeError(f"No CID in first page for {bvid}")
+            return int(cid)
+        except (RuntimeError, requests.RequestException) as exc:
+            raise RuntimeError(f"Failed to get CID for {bvid}: {exc}") from exc
+
+    def _get_dash_streams(self, bvid: str, cid: int) -> dict | None:
+        try:
+            r = self._api_get(
+                f"https://api.bilibili.com/x/player/playurl"
+                f"?bvid={bvid}&cid={cid}&qn={self.quality}&fnval=16"
+            )
+            data = r.json()
+            if data.get("code") != 0:
+                raise RuntimeError(f"playurl API code={data.get('code')}: {data.get('message')}")
+            dash = data.get("data", {}).get("dash")
+            if not dash or not dash.get("video") or not dash.get("audio"):
+                return None
+            return dash
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Failed to get DASH streams for {bvid}: {exc}") from exc
+
+    def _get_playback_url(self, bvid: str, cid: int) -> str | None:
+        try:
+            r = self._api_get(
+                f"https://api.bilibili.com/x/player/playurl"
+                f"?bvid={bvid}&cid={cid}&qn={self.quality}&fnval=1"
+            )
+            data = r.json()
+            if data.get("code") != 0:
+                raise RuntimeError(f"playurl API code={data.get('code')}: {data.get('message')}")
+            durl = data.get("data", {}).get("durl", [])
+            if not durl:
+                return None
+            url = durl[0].get("url")
+            if not url:
+                raise RuntimeError("playurl returned empty URL in durl")
+            return url
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Failed to get playback URL for {bvid}: {exc}") from exc
 
     def _download_dash(self, bvid: str, output_path: str) -> str | None:
         cid = self._get_cid(bvid)
@@ -253,106 +393,6 @@ class BilibiliDownloader(Downloader):
             return output_path
         raise RuntimeError("Downloaded file is empty")
 
-    def _get_info_ytdlp(self, url: str) -> VideoInfo:
-        proc = self._run_ytdlp(["--dump-json", "--no-download", url])
-        if proc.returncode != 0:
-            raise RuntimeError(f"yt-dlp --dump-json failed: {proc.stderr.strip()}")
-        data = json.loads(proc.stdout)
-        extractor = data.get("extractor_key") or data.get("extractor") or ""
-        sub_langs: list[str] = []
-        for key in ("subtitles", "automatic_captions"):
-            if isinstance(data.get(key), dict):
-                sub_langs.extend(data[key].keys())
-        seen: set[str] = set()
-        unique_subs = [lang for lang in sub_langs if lang not in seen and not seen.add(lang)]
-        return VideoInfo(
-            url=url,
-            title=data.get("title", ""),
-            author=data.get("uploader") or data.get("channel") or "",
-            duration=_safe_int(data.get("duration")),
-            description=data.get("description", ""),
-            upload_date=data.get("upload_date", ""),
-            platform=extractor or "BiliBili",
-            filesize=_safe_int(data.get("filesize") or data.get("filesize_approx")),
-            format=data.get("format", ""),
-            subtitles=unique_subs,
-        )
-
-    def _get_info_api(self, bvid: str) -> VideoInfo:
-        r = self._api_get(f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}")
-        data = r.json()
-        if data.get("code") != 0:
-            raise RuntimeError(f"Bilibili API returned code={data.get('code')}: {data.get('message')}")
-        info = data["data"]
-        return VideoInfo(
-            url=f"https://www.bilibili.com/video/{bvid}/",
-            title=info.get("title", ""),
-            author=info.get("owner", {}).get("name", ""),
-            duration=_safe_int(info.get("duration")),
-            description=info.get("desc", ""),
-            upload_date=str(info.get("pubdate", "")),
-            platform="BiliBili",
-        )
-
-    def _api_get(self, url: str) -> requests.Response:
-        r = requests.get(url, headers=self._headers, timeout=self.request_timeout)
-        if r.status_code != 200:
-            raise RuntimeError(f"Bilibili API HTTP {r.status_code} for {url}")
-        return r
-
-    def _get_cid(self, bvid: str) -> int | None:
-        try:
-            r = self._api_get(f"https://api.bilibili.com/x/player/pagelist?bvid={bvid}")
-            data = r.json()
-            pages = data.get("data")
-            if not pages:
-                raise RuntimeError(f"Empty pagelist for {bvid}")
-            cid = pages[0].get("cid")
-            if not cid:
-                raise RuntimeError(f"No CID in first page for {bvid}")
-            return int(cid)
-        except (RuntimeError, requests.RequestException) as exc:
-            raise RuntimeError(f"Failed to get CID for {bvid}: {exc}") from exc
-
-    def _get_dash_streams(self, bvid: str, cid: int) -> dict | None:
-        try:
-            r = self._api_get(
-                f"https://api.bilibili.com/x/player/playurl"
-                f"?bvid={bvid}&cid={cid}&qn={self.quality}&fnval=16"
-            )
-            data = r.json()
-            if data.get("code") != 0:
-                raise RuntimeError(f"playurl API code={data.get('code')}: {data.get('message')}")
-            dash = data.get("data", {}).get("dash")
-            if not dash or not dash.get("video") or not dash.get("audio"):
-                return None
-            return dash
-        except RuntimeError:
-            raise
-        except Exception as exc:
-            raise RuntimeError(f"Failed to get DASH streams for {bvid}: {exc}") from exc
-
-    def _get_playback_url(self, bvid: str, cid: int) -> str | None:
-        try:
-            r = self._api_get(
-                f"https://api.bilibili.com/x/player/playurl"
-                f"?bvid={bvid}&cid={cid}&qn={self.quality}&fnval=1"
-            )
-            data = r.json()
-            if data.get("code") != 0:
-                raise RuntimeError(f"playurl API code={data.get('code')}: {data.get('message')}")
-            durl = data.get("data", {}).get("durl", [])
-            if not durl:
-                return None
-            url = durl[0].get("url")
-            if not url:
-                raise RuntimeError("playurl returned empty URL in durl")
-            return url
-        except RuntimeError:
-            raise
-        except Exception as exc:
-            raise RuntimeError(f"Failed to get playback URL for {bvid}: {exc}") from exc
-
     def _download_stream(self, url: str, dest: str, *, timeout: int) -> None:
         for attempt in range(self.max_retries):
             try:
@@ -368,44 +408,7 @@ class BilibiliDownloader(Downloader):
                     raise RuntimeError(f"Stream download failed after {self.max_retries} attempts: {exc}") from exc
                 time.sleep(2 * (attempt + 1))
 
-    def _run_ytdlp(self, args: list[str]) -> subprocess.CompletedProcess:
-        cmd = [self.yt_dlp_path, *args]
-        try:
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=self.download_timeout)
-        except FileNotFoundError as exc:
-            raise RuntimeError(f"yt-dlp not found at '{self.yt_dlp_path}': {exc}") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"yt-dlp timed out after {self.download_timeout}s") from exc
-
 
 def _extract_bvid(url: str) -> str | None:
     match = _BVID_RE.search(url)
     return match.group(0) if match else None
-
-
-def _safe_int(val, default: int = 0) -> int:
-    try:
-        return int(val)
-    except (TypeError, ValueError):
-        return default
-
-
-def _parse_vtt(vtt_path: Path) -> str:
-    lines: list[str] = []
-    prev = ""
-    with open(vtt_path, encoding="utf-8") as f:
-        for raw_line in f:
-            line = raw_line.strip()
-            if not line:
-                continue
-            if line.startswith("WEBVTT") or line.startswith("NOTE"):
-                continue
-            if re.match(r"^\d+$", line):
-                continue
-            if re.match(r"[\d:.,]+\s*-->\s*[\d:.,]+", line):
-                continue
-            clean = re.sub(r"<[^>]+>", "", line).strip()
-            if clean and clean != prev:
-                lines.append(clean)
-                prev = clean
-    return " ".join(lines)

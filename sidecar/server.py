@@ -15,6 +15,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from content_understand.defaults import SIDECAR_PORT
 from engine.config_bridge import settings_to_config
 from engine.index.db import list_pages, open_db
 from engine.index.rebuild import rebuild_from_vault, upsert_single_file
@@ -385,7 +386,7 @@ def index_rebuild():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=17890)
+    parser.add_argument("--port", type=int, default=SIDECAR_PORT)
     args = parser.parse_args()
     ensure_app_dirs()
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")

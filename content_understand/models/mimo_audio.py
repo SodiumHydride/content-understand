@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 
 from content_understand._keys import KeyRotator, rotate_request
+from content_understand.defaults import MIMO_DEFAULT_MODEL
 from content_understand.models.audio_base import AudioModel
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ class MimoAudioModel(AudioModel):
     def __init__(self, config) -> None:
         self.api_base = config.api_base
         self.rotator = KeyRotator(config.api_keys or [])
-        self.model_name = config.model or "mimo-v2.5"
+        self.model_name = config.model or MIMO_DEFAULT_MODEL
         self.max_tokens = config.max_tokens
         self.timeout = config.timeout or 600
         extra = getattr(config, "extra", {}) or {}

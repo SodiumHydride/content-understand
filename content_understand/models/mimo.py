@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from content_understand._keys import KeyRotator, rotate_request
+from content_understand.defaults import MIMO_DEFAULT_MODEL, MIMO_DEFAULT_MODEL_PRO
 from content_understand.models.base import VideoModel
 
 logger = logging.getLogger(__name__)
@@ -16,8 +17,8 @@ class MimoModel(VideoModel):
     def __init__(self, config) -> None:
         self.api_base = config.api_base
         self.rotator = KeyRotator(config.api_keys or [])
-        self.model_video = config.model or "mimo-v2.5"
-        self.model_text = config.model or "mimo-v2.5-pro"
+        self.model_video = config.model or MIMO_DEFAULT_MODEL
+        self.model_text = config.model or MIMO_DEFAULT_MODEL_PRO
         self.max_tokens = config.max_tokens
         self.timeout = config.timeout
 

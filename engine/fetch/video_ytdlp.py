@@ -5,8 +5,10 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from content_understand.defaults import VIDEO_QUALITY_DEFAULT
 
-def download_video(url: str, dest_dir: Path) -> Path:
+
+def download_video(url: str, dest_dir: Path, quality: int = VIDEO_QUALITY_DEFAULT) -> Path:
     import yt_dlp
 
     # Use a unique subdirectory per download to prevent race conditions
@@ -20,7 +22,8 @@ def download_video(url: str, dest_dir: Path) -> Path:
         "outtmpl": outtmpl,
         "quiet": True,
         "no_warnings": True,
-        "format": "best[height<=720]/best",
+        "format": f"bv*[height<={quality}]+ba/b[height<={quality}]/b",
+        "merge_output_format": "mp4",
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=True)
