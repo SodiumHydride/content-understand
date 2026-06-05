@@ -22,11 +22,18 @@ def _ensure_local_ready(
     config: ContentConfig,
     on_progress: ProgressFn | None = None,
 ) -> str | None:
-    """Ensure local inference server is ready. Returns base URL or None.
+    """Ensure local inference is ready. Returns OpenAI-compatible base URL.
 
-    If autoStartLocal is enabled and the server is idle, triggers setup.
-    Waits for the server to become ready (up to 120s).
+    Priority:
+    1. Ollama (if running or can be started)
+    2. llama-server (legacy fallback)
     """
+    # Try Ollama first
+    ollama_url = _try_ollama(on_progress)
+    if ollama_url:
+        return ollama_url
+
+    # Fallback to llama-server
     from engine.runtime.manager import get_runtime_manager
 
     rt = get_runtime_manager()
@@ -36,7 +43,6 @@ def _ensure_local_ready(
         return rt.local_base_url
 
     if rt.state == "working":
-        # Already starting, wait for it
         if on_progress:
             on_progress("model", 5, "Waiting for local server to start...")
         for _ in range(240):
@@ -48,14 +54,13 @@ def _ensure_local_ready(
         raise RuntimeError("Local engine startup timeout (120s)")
 
     if rt.state == "idle":
-        # Try to auto-start
         from engine.runtime.presets import recommend_preset
 
         rt.refresh_hardware()
         preset = recommend_preset(rt.hardware)
         if on_progress:
             on_progress("model", 5, f"Starting local server ({preset.get('id', 'unknown')})...")
-        rt.setup_async(preset["id"], prefer_ollama=True)
+        rt.setup_async(preset["id"], prefer_ollama=False)
 
         for _ in range(240):
             if rt.state == "ready" and rt.local_base_url:
@@ -69,6 +74,38 @@ def _ensure_local_ready(
         raise RuntimeError(f"Local engine in error state: {rt.message}")
 
     return None
+
+
+def _try_ollama(on_progress: ProgressFn | None = None) -> str | None:
+    """Try to use Ollama for local inference. Returns base URL or None."""
+    from engine.runtime.ollama_manager import detect_existing_ollama, find_ollama_binary
+
+    from engine.paths import app_data_root
+
+    # Check if Ollama is already running
+    existing = detect_existing_ollama()
+    if existing:
+        return existing
+
+    # Try to start our Ollama
+    runtime_dir = app_data_root() / "runtime"
+    binary = find_ollama_binary(runtime_dir)
+    if not binary:
+        return None  # Ollama not installed
+
+    if on_progress:
+        on_progress("model", 5, "Starting Ollama...")
+
+    from engine.runtime.ollama_manager import OllamaDaemon
+    from engine.paths import models_dir
+
+    daemon = OllamaDaemon()
+    try:
+        base = daemon.start(runtime_dir, models_dir())
+        return base
+    except Exception as exc:
+        logger.warning("Failed to start Ollama: %s", exc)
+        return None
 
 
 def detect_kind(path: Path) -> str:
