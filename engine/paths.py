@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform
 from pathlib import Path
 
 
@@ -10,7 +11,15 @@ def app_data_root() -> Path:
     raw = os.environ.get("CONTENT_APP_DATA", "").strip()
     if raw:
         return Path(raw).expanduser()
-    # Dev / manual sidecar without Electron
+    # Match appPaths.ts: macOS → ~/Library/Application Support/<appName>/ContentUnderstand/
+    #   Electron's app.getPath('userData') = ~/Library/Application Support/content-understand/
+    #   appPaths.ts appends /ContentUnderstand/
+    system = platform.system()
+    if system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "content-understand" / "ContentUnderstand"
+    if system == "Windows":
+        return Path.home() / ".content-understand"
+    # Linux
     return Path.home() / ".content-understand"
 
 
