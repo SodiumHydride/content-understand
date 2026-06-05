@@ -117,14 +117,21 @@ export function SettingsModal(): React.JSX.Element | null {
     { value: 'api_only', label: t('settings.inferenceApiOnly') }
   ]
 
-  // Group presets by tier
+  // Group presets by tier, mark downloaded ones
   const presetOptions: SelectOption[] = presets.map((p) => ({
     value: p.id,
-    label: `${isZh ? p.label_zh : p.label_en} (${p.download_size_gb} GB)`,
+    label: `${isZh ? p.label_zh : p.label_en} (${p.download_size_gb} GB)${p.downloaded ? ' ✓' : ''}`,
     group: isZh
       ? (TIER_LABELS[p.tier]?.zh ?? p.tier)
       : (TIER_LABELS[p.tier]?.en ?? p.tier)
   }))
+
+  // Auto-select downloaded preset if nothing selected
+  const effectivePresetId =
+    settings.localPresetId ||
+    presets.find((p) => p.downloaded)?.id ||
+    runtimeRec?.recommended_preset_id ||
+    ''
 
   const handleDeleteModel = async (filename: string): Promise<void> => {
     setDeleting(filename)
@@ -276,7 +283,7 @@ export function SettingsModal(): React.JSX.Element | null {
                 {presetOptions.length > 0 && (
                   <Field label={t('settings.localPreset')}>
                     <Select
-                      value={settings.localPresetId || runtimeRec?.recommended_preset_id || ''}
+                      value={effectivePresetId}
                       options={presetOptions}
                       onChange={(v) => updateSettings({ localPresetId: v })}
                       compact

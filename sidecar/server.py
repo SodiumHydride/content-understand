@@ -226,7 +226,16 @@ def runtime_recommend():
 
 @app.get("/v1/runtime/presets")
 def runtime_presets():
-    return {"presets": list_presets()}
+    from engine.paths import models_dir
+    from engine.runtime.download import preset_model_paths
+
+    mdir = models_dir()
+    result = []
+    for p in list_presets():
+        main, mmproj = preset_model_paths(p, mdir)
+        entry = {**p, "downloaded": main is not None and main.exists()}
+        result.append(entry)
+    return {"presets": result}
 
 
 @app.post("/v1/runtime/setup")
@@ -236,6 +245,26 @@ def runtime_setup(body: RuntimeSetupPayload):
     rt = get_runtime_manager()
     rt.setup_async(body.preset_id, prefer_ollama=body.prefer_ollama)
     return {"ok": True, "state": rt.state}
+
+
+@app.get("/v1/runtime/version")
+def runtime_version():
+    """Check installed vs latest llama.cpp version."""
+    from engine.paths import app_data_root
+    from engine.runtime.llama_install import (
+        LLAMA_RELEASE_TAG,
+        _installed_version,
+        check_latest_version,
+    )
+
+    installed = _installed_version(app_data_root() / "runtime")
+    latest = check_latest_version()
+    return {
+        "installed": installed,
+        "pinned": LLAMA_RELEASE_TAG,
+        "latest": latest,
+        "update_available": installed is not None and latest is not None and installed != latest,
+    }
 
 
 @app.post("/v1/runtime/stop")
@@ -290,10 +319,10 @@ def runtime_auto_detect():
 def list_models():
     """List downloaded local models with sizes."""
     from engine.paths import models_dir
-    from engine.runtime.presets import load_presets
+    from engine.runtime.presets import list_presets
 
     mdir = models_dir()
-    presets = load_presets()
+    presets = list_presets()
 
     # Map filename → preset info
     file_to_preset: dict[str, dict] = {}

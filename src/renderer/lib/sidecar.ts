@@ -150,6 +150,7 @@ export interface RuntimePreset {
   min_vram_gb: number
   min_unified_memory_gb: number
   cpu_recommended: boolean
+  downloaded?: boolean
 }
 
 export async function fetchRuntimeRecommend(): Promise<RuntimeRecommend | null> {
@@ -227,6 +228,27 @@ export async function autoDetectRuntime(): Promise<RuntimeAutoDetect | null> {
     const r = await fetch(`${base}/v1/runtime/auto-detect`, { method: 'POST' })
     if (!r.ok) return null
     return (await r.json()) as RuntimeAutoDetect
+  } catch {
+    return null
+  }
+}
+
+// ── Runtime version ──
+
+export interface RuntimeVersion {
+  installed: string | null
+  pinned: string
+  latest: string | null
+  update_available: boolean
+}
+
+export async function fetchRuntimeVersion(): Promise<RuntimeVersion | null> {
+  const base = await getBase()
+  if (!base) return null
+  try {
+    const r = await fetch(`${base}/v1/runtime/version`)
+    if (!r.ok) return null
+    return (await r.json()) as RuntimeVersion
   } catch {
     return null
   }

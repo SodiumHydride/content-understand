@@ -1,7 +1,7 @@
 """Download official llama.cpp release binaries (macOS / Windows / Linux).
 
-Auto-update: checks GitHub releases for a newer version when the binary
-already exists.  Uses a marker file to avoid checking too frequently.
+Version is pinned to LLAMA_RELEASE_TAG.  Does NOT auto-update to avoid
+breaking changes.  Users can manually trigger an update via the UI.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ import shutil
 import stat
 import tarfile
 import tempfile
-import time
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -21,57 +20,11 @@ from urllib.request import Request, urlopen, urlretrieve
 
 logger = logging.getLogger(__name__)
 
-# Minimum tag that supports Gemma 4 / mtmd
-_MIN_TAG = "b9484"
+# Pinned release — update manually after testing
+LLAMA_RELEASE_TAG = "b9484"
 _RELEASES_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
-_CHECK_INTERVAL = 86400  # seconds between update checks (1 day)
 
 ProgressFn = Callable[[str, int, str], None]
-
-
-def _fetch_latest_tag() -> str | None:
-    """Query GitHub for the latest llama.cpp release tag."""
-    try:
-        req = Request(_RELEASES_API, headers={"Accept": "application/vnd.github+json"})
-        with urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-        tag = data.get("tag_name", "")
-        return tag if tag else None
-    except Exception:
-        logger.debug("Failed to fetch latest llama.cpp release", exc_info=True)
-        return None
-
-
-def _installed_version(runtime_dir: Path) -> str | None:
-    """Read the version from the .installed marker file."""
-    from engine.runtime.llama_bin import _platform_subdir
-
-    system = platform.system().lower()
-    arch = platform.machine().lower()
-    sub = _platform_subdir(system, arch)
-    if not sub:
-        return None
-    marker = runtime_dir / "llama" / sub / ".installed"
-    if marker.exists():
-        return marker.read_text(encoding="utf-8").strip()
-    return None
-
-
-def _last_check_time(runtime_dir: Path) -> float:
-    """Read the timestamp of the last update check."""
-    ts_file = runtime_dir / "llama" / ".update_check"
-    if ts_file.exists():
-        try:
-            return float(ts_file.read_text(encoding="utf-8").strip())
-        except ValueError:
-            pass
-    return 0
-
-
-def _record_check_time(runtime_dir: Path) -> None:
-    ts_file = runtime_dir / "llama" / ".update_check"
-    ts_file.parent.mkdir(parents=True, exist_ok=True)
-    ts_file.write_text(str(time.time()), encoding="utf-8")
 
 
 def release_asset_for_platform(tag: str) -> tuple[str, str] | None:
@@ -110,45 +63,49 @@ def _server_names() -> list[str]:
     return ["llama-server", "llama"]
 
 
+def _installed_version(runtime_dir: Path) -> str | None:
+    """Read the version from the .installed marker file."""
+    from engine.runtime.llama_bin import _platform_subdir
+
+    system = platform.system().lower()
+    arch = platform.machine().lower()
+    sub = _platform_subdir(system, arch)
+    if not sub:
+        return None
+    marker = runtime_dir / "llama" / sub / ".installed"
+    if marker.exists():
+        return marker.read_text(encoding="utf-8").strip()
+    return None
+
+
+def check_latest_version() -> str | None:
+    """Query GitHub for the latest llama.cpp release tag. Returns None on failure."""
+    try:
+        req = Request(_RELEASES_API, headers={"Accept": "application/vnd.github+json"})
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+        tag = data.get("tag_name", "")
+        return tag if tag else None
+    except Exception:
+        logger.debug("Failed to fetch latest llama.cpp release", exc_info=True)
+        return None
+
+
 def ensure_llama_server_binary(
     runtime_dir: Path,
     on_progress: ProgressFn | None = None,
 ) -> Path:
-    """Ensure llama-server exists and is up-to-date.
+    """Ensure llama-server exists under runtime_dir/llama/<platform>/.
 
-    1. If not installed → download latest.
-    2. If installed but update check is stale → check GitHub, update if newer.
-    3. Otherwise → return existing binary.
+    Downloads the pinned version if not installed. Does NOT auto-update.
     """
-    from engine.runtime.llama_bin import find_llama_server
-
-    existing = find_llama_server(runtime_dir)
-    installed = _installed_version(runtime_dir)
-
-    if existing and installed:
-        # Check if we should look for an update
-        now = time.time()
-        if now - _last_check_time(runtime_dir) > _CHECK_INTERVAL:
-            _record_check_time(runtime_dir)
-            latest = _fetch_latest_tag()
-            if latest and latest != installed:
-                logger.info("llama.cpp update available: %s → %s", installed, latest)
-                return _download_and_install(runtime_dir, latest, on_progress)
-        return existing
-
-    # Not installed — download latest (or fallback to minimum)
-    tag = _fetch_latest_tag() or _MIN_TAG
-    return _download_and_install(runtime_dir, tag, on_progress)
-
-
-def _download_and_install(
-    runtime_dir: Path,
-    tag: str,
-    on_progress: ProgressFn | None = None,
-) -> Path:
-    """Download and install a specific llama.cpp release."""
     from engine.runtime.llama_bin import _platform_subdir, ensure_executable, find_llama_server
 
+    existing = find_llama_server(runtime_dir)
+    if existing:
+        return existing
+
+    tag = LLAMA_RELEASE_TAG
     asset = release_asset_for_platform(tag)
     if not asset:
         raise RuntimeError(f"Unsupported platform: {platform.system()} {platform.machine()}")
@@ -162,9 +119,14 @@ def _download_and_install(
 
     dest_root = runtime_dir / "llama" / sub
     dest_root.mkdir(parents=True, exist_ok=True)
+    marker = dest_root / ".installed"
+    if marker.exists():
+        found = find_llama_server(runtime_dir)
+        if found:
+            return found
 
     if on_progress:
-        on_progress("download", 15, f"llama.cpp {tag}")
+        on_progress("download", 15, "llama.cpp binary")
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -191,16 +153,13 @@ def _download_and_install(
         if system == "darwin":
             _strip_macos_quarantine(dest_root)
 
-    marker = dest_root / ".installed"
     marker.write_text(tag, encoding="utf-8")
-    _record_check_time(runtime_dir)
-
     found = find_llama_server(runtime_dir)
     if not found:
         raise RuntimeError("llama-server install failed")
     ensure_executable(found)
     if on_progress:
-        on_progress("download", 20, f"llama.cpp {tag} ready")
+        on_progress("download", 20, "llama.cpp ready")
     return found
 
 
