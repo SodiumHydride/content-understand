@@ -223,6 +223,16 @@ class RuntimeManager:
             models_dir=str(models_dir()),
             app_download_in_progress=bool(dl.get("running")),
             app_download_error=dl.get("error") if isinstance(dl.get("error"), str) else None,
+            app_download_progress={
+                "stage": "download",
+                "percent": int(dl.get("percent", 0) or 0),
+                "message": str(dl.get("message", "") or ""),
+                "total_bytes": int(dl.get("total_bytes", 0) or 0),
+                "completed_bytes": int(dl.get("completed_bytes", 0) or 0),
+                "speed_bps": float(dl.get("speed_bps", 0.0) or 0.0),
+            }
+            if dl.get("running")
+            else None,
         )
         view["operation"] = self.operation_snapshot()
         return view

@@ -38,7 +38,15 @@ ProgressFn = Callable[[str, int, str], None]
 _daemon: OllamaDaemon | None = None
 
 _download_lock = threading.Lock()
-_download_state: dict[str, object] = {"running": False, "error": None}
+_download_state: dict[str, object] = {
+    "running": False,
+    "error": None,
+    "percent": 0,
+    "message": "",
+    "total_bytes": 0,
+    "completed_bytes": 0,
+    "speed_bps": 0.0,
+}
 
 
 def app_download_state() -> dict[str, object]:
@@ -57,17 +65,42 @@ def start_app_ollama_download(runtime_dir: Path) -> dict[str, object]:
                 "status": "already_installed",
                 "path": str(app_binary_path(runtime_dir)),
             }
-        _download_state.update({"running": True, "error": None})
+        _download_state.update({
+            "running": True,
+            "error": None,
+            "percent": 0,
+            "message": "starting",
+            "total_bytes": 0,
+            "completed_bytes": 0,
+            "speed_bps": 0.0,
+        })
+
+    def _progress(stage: str, percent: int, message: str) -> None:
+        with _download_lock:
+            _download_state.update({
+                "percent": percent,
+                "message": message,
+                "stage": stage,
+            })
 
     def _run() -> None:
         try:
-            download_ollama(runtime_dir)
+            download_ollama(runtime_dir, on_progress=_progress)
             with _download_lock:
-                _download_state.update({"running": False, "error": None})
+                _download_state.update({
+                    "running": False,
+                    "error": None,
+                    "percent": 100,
+                    "message": "ready",
+                })
         except Exception as exc:
             logger.exception("App Ollama download failed")
             with _download_lock:
-                _download_state.update({"running": False, "error": str(exc)[:500]})
+                _download_state.update({
+                    "running": False,
+                    "error": str(exc)[:500],
+                    "message": str(exc)[:200],
+                })
 
     threading.Thread(target=_run, daemon=True, name="ollama-download").start()
     return {"ok": True, "status": "started"}
@@ -271,11 +304,15 @@ def resolve_active_ollama(
 
 
 def _download_with_progress(url: str, dest: Path, on_progress: ProgressFn | None = None) -> None:
+    import time
+
     chunk_size = 256 * 1024
     req = Request(url)
     with urlopen(req, timeout=30) as resp:
         total = int(resp.headers.get("Content-Length", 0))
         downloaded = 0
+        speed_window: list[tuple[float, int]] = []
+        last_speed = 0.0
         with open(dest, "wb") as f:
             while True:
                 chunk = resp.read(chunk_size)
@@ -283,9 +320,33 @@ def _download_with_progress(url: str, dest: Path, on_progress: ProgressFn | None
                     break
                 f.write(chunk)
                 downloaded += len(chunk)
+                now = time.monotonic()
+                speed_window.append((now, downloaded))
+                speed_window = [(t, b) for t, b in speed_window if now - t < 10]
+                if len(speed_window) > 5:
+                    speed_window = speed_window[-5:]
+                if len(speed_window) >= 2:
+                    t0, b0 = speed_window[0]
+                    t1, b1 = speed_window[-1]
+                    dt = t1 - t0
+                    if dt > 0:
+                        last_speed = (b1 - b0) / dt
                 if on_progress and total > 0:
                     pct = int(5 + (downloaded / total) * 40)
-                    on_progress("download", pct, f"{downloaded // (1024 * 1024)}/{total // (1024 * 1024)} MB")
+                    msg = f"{downloaded // (1024 * 1024)}/{total // (1024 * 1024)} MB"
+                    on_progress("download", pct, msg)
+                with _download_lock:
+                    _download_state.update({
+                        "percent": int(5 + (downloaded / total) * 40) if total > 0 else 0,
+                        "message": (
+                            f"{downloaded // (1024 * 1024)}/{total // (1024 * 1024)} MB"
+                            if total > 0
+                            else "downloading"
+                        ),
+                        "total_bytes": total,
+                        "completed_bytes": downloaded,
+                        "speed_bps": last_speed,
+                    })
 
 
 def download_ollama(

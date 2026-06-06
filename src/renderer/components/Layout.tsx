@@ -9,10 +9,12 @@ import { NotePreview } from './NotePreview'
 import { SettingsModal } from './SettingsModal'
 import { SetupBanner } from './SetupBanner'
 import { TaskBar } from './TaskBar'
+import { useOllamaOperationSync } from '../hooks/useOllamaOperationSync'
 import { useAppStore } from '../stores/appStore'
 import { getReaderPresentation } from '../lib/readerPresentation'
 
 export function Layout({ children }: { children?: ReactNode }): React.JSX.Element {
+  useOllamaOperationSync()
   const viewMode = useAppStore((s) => s.viewMode)
   const mapMode = useAppStore((s) => s.mapMode)
   const selectedSlug = useAppStore((s) => s.selectedSlug)

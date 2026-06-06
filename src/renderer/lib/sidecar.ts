@@ -324,20 +324,25 @@ export async function exportCookies(browser: string): Promise<CookiesExportResul
 
 // ── Ollama management ──
 
+export interface OllamaOperationProgress {
+  stage: string
+  percent: number
+  message: string
+  total_bytes?: number
+  completed_bytes?: number
+  speed_bps?: number
+  elapsed_sec?: number
+}
+
 export interface OllamaOperation {
   state: 'idle' | 'working' | 'ready' | 'error'
   message: string
-  progress: {
-    stage: string
-    percent: number
-    message: string
-    total_bytes?: number
-    completed_bytes?: number
-    speed_bps?: number
-    elapsed_sec?: number
-  }
+  progress: OllamaOperationProgress
   pulling_preset_id: string | null
   setup_running: boolean
+  ollama_health?: 'unknown' | 'healthy' | 'unhealthy' | 'restarting' | 'error'
+  ollama_last_health_check?: number
+  ollama_restart_count?: number
 }
 
 export interface OllamaCatalog {
@@ -345,6 +350,7 @@ export interface OllamaCatalog {
   running: boolean
   app_binary_installed: boolean
   app_download_in_progress?: boolean
+  app_download_progress?: OllamaOperationProgress
   app_download_error?: string | null
   models_dir: string
   selected_preset_id: string | null

@@ -4,17 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import type { AppLocale } from '../lib/i18n'
-import { useEffect, useState } from 'react'
-import {
-  fetchRuntimeRecommend,
-  fetchRuntimeStatus,
-  fetchPresets,
-  rebuildIndex,
-  startRuntimeSetup,
-  exportCookies,
-  type RuntimeRecommend,
-  type RuntimePreset
-} from '../lib/sidecar'
+import { useState } from 'react'
+import { rebuildIndex, exportCookies } from '../lib/sidecar'
 import type { InferenceMode } from '../stores/types'
 import { Select, type SelectOption } from './Select'
 import { ProviderCard } from './ProviderCard'
@@ -42,50 +33,6 @@ export function SettingsModal(): React.JSX.Element | null {
   const [tab, setTab] = useState<SettingsTab>('general')
   const [savedFlash, setSavedFlash] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [runtimeRec, setRuntimeRec] = useState<RuntimeRecommend | null>(null)
-  const [runtimeState, setRuntimeState] = useState<string>('')
-  const [runtimeProgress, setRuntimeProgress] = useState<{ percent: number; message: string } | null>(null)
-  const [presets, setPresets] = useState<RuntimePreset[]>([])
-  const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
-
-  // Poll runtime status when setup is in progress
-  const startPolling = React.useCallback(() => {
-    if (pollRef.current) return
-    pollRef.current = setInterval(async () => {
-      const s = await fetchRuntimeStatus()
-      if (!s) return
-      setRuntimeState(s.state)
-      if (s.progress) {
-        setRuntimeProgress({ percent: s.progress.percent ?? 0, message: s.progress.message ?? '' })
-      }
-      if (s.state === 'ready' || s.state === 'error' || s.state === 'idle') {
-        setRuntimeProgress(null)
-        if (pollRef.current) {
-          clearInterval(pollRef.current)
-          pollRef.current = null
-        }
-      }
-    }, 1000)
-  }, [])
-
-  React.useEffect(() => {
-    return () => {
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!open || tab !== 'models') return
-    void fetchRuntimeRecommend().then(setRuntimeRec)
-    void fetchRuntimeStatus().then((s) => {
-      if (s && typeof s.state === 'string') {
-        setRuntimeState(s.state)
-        if (s.state === 'working') startPolling()
-      }
-    })
-    void fetchPresets().then(setPresets)
-  }, [open, tab, startPolling])
-
   if (!open) return null
 
   const save = (): void => {

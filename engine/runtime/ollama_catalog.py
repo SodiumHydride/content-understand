@@ -162,6 +162,7 @@ def build_catalog_view(
     models_dir: str,
     app_download_in_progress: bool = False,
     app_download_error: str | None = None,
+    app_download_progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Merge presets with install state for the settings UI."""
     installed_by_preset = {
@@ -188,6 +189,7 @@ def build_catalog_view(
         "app_binary_installed": app_binary_installed,
         "app_download_in_progress": app_download_in_progress,
         "app_download_error": app_download_error,
+        "app_download_progress": app_download_progress,
         "models_dir": models_dir,
         "selected_preset_id": selected_preset_id,
         "recommended_preset_id": recommended_preset_id,

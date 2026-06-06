@@ -15,6 +15,7 @@ import {
 } from '../lib/sidecar'
 import { notify } from '../lib/notify'
 import { useTaskStore } from '../stores/taskStore'
+import { ollamaCatalogPollMs, waitForOllamaCatalog } from '../lib/ollamaProgress'
 
 // ─── Catalog (polling) ───────────────────────────────────────────
 
@@ -22,12 +23,7 @@ export function useOllamaCatalog() {
   return useQuery<OllamaCatalog | null>({
     queryKey: ['ollama', 'catalog'],
     queryFn: fetchOllamaCatalog,
-    refetchInterval: (query) => {
-      const op = query.state.data?.operation
-      if (!op) return 30_000 // idle: poll every 30s for health
-      if (op.state === 'working' || op.pulling_preset_id || op.setup_running) return 2_000
-      return 30_000
-    }
+    refetchInterval: (query) => ollamaCatalogPollMs(query.state.data ?? null)
   })
 }
 
@@ -37,7 +33,11 @@ export function useRuntimeStatus() {
   return useQuery<OllamaStatus | null>({
     queryKey: ['ollama', 'status'],
     queryFn: fetchOllamaStatus,
-    refetchInterval: 10_000
+    refetchInterval: (query) => {
+      const catalog = query.state.data?.catalog
+      const interval = ollamaCatalogPollMs(catalog ?? null)
+      return interval === false ? 10_000 : interval
+    }
   })
 }
 
@@ -64,21 +64,40 @@ export function useAllInstalledModels() {
 
 // ─── Pull Model Mutation ─────────────────────────────────────────
 
+type PullModelVars = { presetId: string; modelName: string; isZh: boolean }
+
 export function usePullModel() {
   const queryClient = useQueryClient()
   const addTask = useTaskStore((s) => s.addTask)
-  const updateProgress = useTaskStore((s) => s.updateProgress)
   const completeTask = useTaskStore((s) => s.completeTask)
   const failTask = useTaskStore((s) => s.failTask)
 
-  return useMutation({
-    mutationFn: async ({ presetId, modelName }: { presetId: string; modelName: string }) => {
-      const taskId = addTask({ type: 'pull', modelName, label: `Pulling ${modelName}`, progress: -1 })
+  return useMutation<
+    Awaited<ReturnType<typeof pullOllamaPreset>>,
+    Error,
+    PullModelVars,
+    { taskId: string }
+  >({
+    onMutate: ({ presetId, modelName, isZh }) => {
+      const taskId = `ollama-pull-${presetId}`
+      addTask({
+        id: taskId,
+        type: 'pull',
+        modelName,
+        label: isZh ? `正在拉取 ${modelName}` : `Pulling ${modelName}`,
+        progress: -1,
+        status: 'running'
+      })
+      void queryClient.invalidateQueries({ queryKey: ['ollama', 'catalog'] })
+      return { taskId }
+    },
+    mutationFn: async ({ presetId, isZh }: PullModelVars) => {
+      const taskId = `ollama-pull-${presetId}`
 
       const result = await pullOllamaPreset(presetId)
       if (!result.ok) {
-        failTask(taskId, result.error || 'Pull failed')
-        throw new Error(result.error || 'Pull failed')
+        failTask(taskId, result.error || (isZh ? '拉取失败' : 'Pull failed'))
+        throw new Error(result.error || (isZh ? '拉取失败' : 'Pull failed'))
       }
 
       if (result.status === 'already_installed') {
@@ -86,48 +105,37 @@ export function usePullModel() {
         return result
       }
 
-      // Poll catalog until pull completes
-      const deadline = Date.now() + 2 * 60 * 60 * 1000 // 2h max
-      while (Date.now() < deadline) {
-        const catalog = await fetchOllamaCatalog()
-        const op = catalog?.operation
-
-        if (op?.progress) {
-          const p = op.progress
-          updateProgress(
-            taskId,
-            p.percent ?? -1,
-            p.total_bytes,
-            p.completed_bytes,
-            p.speed_bps
-          )
-        }
-
-        if (op?.state === 'error') {
-          failTask(taskId, op.message || 'Pull failed')
-          throw new Error(op.message || 'Pull failed')
-        }
-
-        const installed = catalog?.presets?.find(
-          (p) => (p.preset_id ?? p.id) === presetId
-        )?.installed
-        if (installed) {
-          completeTask(taskId)
-          return result
-        }
-
-        await new Promise((r) => setTimeout(r, 2000))
+      if (result.status === 'in_progress' && result.preset_id && result.preset_id !== presetId) {
+        const msg = isZh
+          ? '已有其他模型正在拉取，请等待完成后再试'
+          : 'Another model pull is already in progress'
+        failTask(taskId, msg)
+        throw new Error(msg)
       }
 
-      failTask(taskId, 'Pull timed out')
-      throw new Error('Pull timed out')
+      await waitForOllamaCatalog(
+        (catalog) =>
+          catalog.presets?.some(
+            (p) => (p.preset_id ?? p.id) === presetId && p.installed
+          ) === true,
+        {
+          pollMs: 500,
+          failIf: (catalog) =>
+            catalog.operation?.state === 'error'
+              ? catalog.operation.message || (isZh ? '拉取失败' : 'Pull failed')
+              : null
+        }
+      )
+
+      completeTask(taskId)
+      return result
     },
-    onSuccess: () => {
-      notify('Model ready', { type: 'success' })
+    onSuccess: (_data, vars) => {
+      notify(vars.isZh ? '模型已就绪' : 'Model ready', { type: 'success' })
       void queryClient.invalidateQueries({ queryKey: ['ollama'] })
     },
-    onError: (err: Error) => {
-      notify('Pull failed', { type: 'error', description: err.message })
+    onError: (err: Error, vars) => {
+      notify(vars.isZh ? '拉取失败' : 'Pull failed', { type: 'error', description: err.message })
     }
   })
 }

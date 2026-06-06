@@ -106,6 +106,7 @@ def pull_model(base_url: str, name: str, on_progress: ProgressFn | None = None) 
             total = 0
             completed = 0
             speed_window: list[tuple[float, int]] = []  # (time, completed_bytes)
+            last_speed_bps = 0.0
 
             for raw_line in resp:
                 line = raw_line.decode(errors="replace").strip()
@@ -124,7 +125,7 @@ def pull_model(base_url: str, name: str, on_progress: ProgressFn | None = None) 
 
                 # Compute smoothed speed from rolling window (max 5 samples, 10s expiry)
                 now = time.monotonic()
-                speed_bps = 0.0
+                speed_bps = last_speed_bps
                 if completed > 0 and "completed" in msg:
                     speed_window.append((now, completed))
                     speed_window = [(t, c) for t, c in speed_window if now - t < 10]
@@ -136,6 +137,7 @@ def pull_model(base_url: str, name: str, on_progress: ProgressFn | None = None) 
                         dt = t1 - t0
                         if dt > 0:
                             speed_bps = (b1 - b0) / dt
+                            last_speed_bps = speed_bps
 
                 if on_progress and total > 0:
                     pct = int(completed / total * 100)

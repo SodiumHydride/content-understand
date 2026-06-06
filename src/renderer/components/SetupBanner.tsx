@@ -1,41 +1,44 @@
-import { useEffect, useState } from 'react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { fetchRuntimeRecommend, fetchRuntimeStatus } from '../lib/sidecar'
+import { fetchRuntimeRecommend } from '../lib/sidecar'
 import { useAppStore } from '../stores/appStore'
+import { useOllamaCatalog } from '../hooks/useOllamaQueries'
+import { deriveOperationProgress } from '../lib/ollamaProgress'
+import { useQuery } from '@tanstack/react-query'
 
 export function SetupBanner(): React.JSX.Element | null {
   const { t, i18n } = useTranslation()
+  const isZh = i18n.language.startsWith('zh')
   const sidecarOnline = useAppStore((s) => s.sidecarOnline)
   const settings = useAppStore((s) => s.settings)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
-  const [line, setLine] = useState('')
+  const { data: catalog } = useOllamaCatalog()
 
-  useEffect(() => {
-    if (!sidecarOnline) return
-    void (async () => {
-      const st = await fetchRuntimeStatus()
-      if (st?.state === 'ready') {
-        setLine(t('setup.localReady'))
-        return
-      }
-      if (st?.state === 'working') {
-        setLine(`${t('setup.localWorking')} ${st.progress?.percent ?? 0}%`)
-        return
-      }
-      if (settings.inferenceMode === 'api_only') {
-        setLine('')
-        return
-      }
-      const rec = await fetchRuntimeRecommend()
-      if (rec) {
-        setLine(
-          i18n.language.startsWith('zh')
-            ? rec.summary_zh.split('\n').slice(-1)[0]
-            : rec.summary_en.split('\n').slice(-1)[0]
-        )
-      }
-    })()
-  }, [sidecarOnline, settings.inferenceMode, i18n.language, t])
+  const { data: recommend } = useQuery({
+    queryKey: ['runtime', 'recommend'],
+    queryFn: fetchRuntimeRecommend,
+    enabled: sidecarOnline && settings.inferenceMode !== 'api_only',
+    staleTime: 60_000
+  })
+
+  const line = useMemo(() => {
+    if (!sidecarOnline) return ''
+    const opProgress = deriveOperationProgress(catalog ?? null, catalog?.presets ?? [], isZh)
+    if (opProgress) {
+      const pct =
+        typeof opProgress.percent === 'number' ? ` ${opProgress.percent}%` : ''
+      const speed = opProgress.speed ? ` · ${opProgress.speed}` : ''
+      return `${opProgress.label}${pct}${speed}`
+    }
+    if (catalog?.running) return t('setup.localReady')
+    if (settings.inferenceMode === 'api_only') return ''
+    if (recommend) {
+      return isZh
+        ? recommend.summary_zh.split('\n').slice(-1)[0]
+        : recommend.summary_en.split('\n').slice(-1)[0]
+    }
+    return ''
+  }, [sidecarOnline, catalog, isZh, settings.inferenceMode, recommend, t])
 
   if (!line || !sidecarOnline) return null
 
