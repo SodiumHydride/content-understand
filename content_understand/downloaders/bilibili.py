@@ -40,6 +40,10 @@ def _ydl_opts(**overrides) -> dict:
         "no_warnings": True,
         "socket_timeout": 30,
         "retries": 3,
+        "http_headers": {
+            "User-Agent": _FULL_USER_AGENT,
+            "Referer": _REFERER,
+        },
     }
     base.update(overrides)
     return base
@@ -101,6 +105,7 @@ class BilibiliDownloader(Downloader):
                 if result:
                     return result
             except Exception as exc:
+                logger.info("yt-dlp+cookies unavailable, trying next strategy: %s", exc)
                 errors.append(f"yt-dlp+cookies: {exc}")
 
         try:
@@ -108,6 +113,7 @@ class BilibiliDownloader(Downloader):
             if result:
                 return result
         except Exception as exc:
+            logger.info("yt-dlp unavailable, trying Bilibili API fallback: %s", exc)
             errors.append(f"yt-dlp: {exc}")
 
         bvid = _extract_bvid(url)
@@ -117,6 +123,7 @@ class BilibiliDownloader(Downloader):
                 f"Errors: {errors}"
             )
 
+        logger.info("Using Bilibili DASH API for %s", bvid)
         try:
             result = self._download_dash(bvid, output_path)
             if result:
@@ -131,7 +138,13 @@ class BilibiliDownloader(Downloader):
         except Exception as exc:
             errors.append(f"single-stream: {exc}")
 
-        raise RuntimeError(f"All download strategies failed for {url}. Errors: {errors}")
+        hint = ""
+        if any("412" in e for e in errors):
+            hint = (
+                " Bilibili returned HTTP 412 — export browser cookies in Settings "
+                "(Bilibili cookies) and retry."
+            )
+        raise RuntimeError(f"All download strategies failed for {url}. Errors: {errors}.{hint}")
 
     def extract_subtitles(self, url: str, languages: str = "zh-CN,en") -> str | None:
         langs = [lang.strip() for lang in languages.split(",") if lang.strip()]
@@ -201,7 +214,8 @@ class BilibiliDownloader(Downloader):
 
         opts = _ydl_opts(
             outtmpl=outtmpl,
-            format="best[ext=mp4]/best",
+            # Bilibili often has no mp4 container at top quality — strict ext=mp4 fails.
+            format="bv*+ba/b",
             merge_output_format="mp4",
             no_playlist=True,
             no_overwrites=True,

@@ -15,6 +15,18 @@ from content_understand.resolvers.base import Resolver, ResolveResult
 
 logger = logging.getLogger(__name__)
 
+_VIDEO_HOST_FRAGMENTS = (
+    "youtube.com",
+    "youtu.be",
+    "bilibili.com",
+    "b23.tv",
+    "vimeo.com",
+    "tiktok.com",
+    "douyin.com",
+    "twitch.tv",
+    "nicovideo.jp",
+)
+
 
 class HttpPageResolver(Resolver):
     """Download generic HTTP pages (HTML, PDF, etc.)."""
@@ -23,7 +35,16 @@ class HttpPageResolver(Resolver):
     name = "http_page"
 
     def can_resolve(self, input: str) -> bool:
-        return input.startswith(("http://", "https://"))
+        if not input.startswith(("http://", "https://")):
+            return False
+        parsed = urlparse(input)
+        host = (parsed.netloc or "").lower().lstrip("www.")
+        path = (parsed.path or "").lower()
+        if any(frag in host for frag in _VIDEO_HOST_FRAGMENTS):
+            return False
+        if "bilibili" in host and ("/video/" in path or "bv" in path):
+            return False
+        return True
 
     def resolve(self, input: str, ctx: dict[str, Any] | None = None) -> ResolveResult:
         ctx = ctx or {}

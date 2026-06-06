@@ -17,6 +17,7 @@ class AudioModel(ABC):
         audio_path: str,
         prompt: str = "",
         timeout: int = 300,
+        language: str = "zh",
     ) -> str:
         """Understand audio content and return structured text.
 

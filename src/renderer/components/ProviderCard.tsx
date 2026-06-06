@@ -12,7 +12,7 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   gemini: 'Google Gemini',
   claude: 'Anthropic Claude',
   openai_compat: 'OpenAI Compatible',
-  local_server: 'Local (Ollama / llama.cpp)'
+  local_server: 'Local (Ollama)'
 }
 
 interface ProviderCardProps {
@@ -25,6 +25,7 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
   const { t } = useTranslation()
   const [loading, setLoading] = React.useState(false)
   const [expanded, setExpanded] = React.useState(provider.enabled)
+  const autoFetched = React.useRef(false)
 
   const preset = PROVIDER_PRESETS[provider.id]
   const hasBaseUrl = preset?.baseUrl || provider.id === 'openai_compat'
@@ -38,19 +39,45 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
       provider.baseUrl || preset?.baseUrl || '',
       provider.apiKeys
     )
-    if (models && models.length > 0) {
-      onChange({ models })
-      if (!provider.selectedModel || !models.includes(provider.selectedModel)) {
-        onChange({ selectedModel: models[0] })
+    if (models) {
+      const patch: Partial<ProviderConfig> = { models }
+      if (models.length > 0) {
+        if (!provider.selectedModel || !models.includes(provider.selectedModel)) {
+          patch.selectedModel = models[0]
+        }
+      } else if (isLocal && provider.selectedModel) {
+        patch.selectedModel = ''
       }
+      onChange(patch)
     }
     setLoading(false)
   }
 
-  const modelOptions: SelectOption[] = [
-    ...provider.models.map((m) => ({ value: m, label: m })),
-    { value: '__custom__', label: isZh ? '自定义...' : 'Custom...' }
-  ]
+  // Auto-fetch models when provider is enabled and has credentials
+  React.useEffect(() => {
+    if (autoFetched.current) return
+    if (!provider.enabled) return
+    if (isLocal) {
+      // Local: always fetch from presets
+      autoFetched.current = true
+      void handleFetchModels()
+      return
+    }
+    // Cloud: fetch if has API key (or no key needed for some providers)
+    const hasKey = provider.apiKeys.trim().length > 0
+    const needsKey = provider.id !== 'openai_compat' || provider.baseUrl
+    if (hasKey || !needsKey) {
+      autoFetched.current = true
+      void handleFetchModels()
+    }
+  }, [provider.enabled, provider.apiKeys])
+
+  const modelOptions: SelectOption[] = isLocal
+    ? provider.models.map((m) => ({ value: m, label: m }))
+    : [
+        ...provider.models.map((m) => ({ value: m, label: m })),
+        { value: '__custom__', label: isZh ? '自定义...' : 'Custom...' }
+      ]
 
   const effectiveModel = provider.models.includes(provider.selectedModel)
     ? provider.selectedModel
@@ -147,21 +174,21 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
               <span className="settings-field-label">
                 {isZh ? '模型' : 'Model'}
               </span>
-              {!isLocal && (
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--color-accent)]"
-                  onClick={handleFetchModels}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <Loader2 size={10} className="animate-spin" />
-                  ) : (
-                    <RefreshCw size={10} />
-                  )}
-                  {isZh ? '拉取模型列表' : 'Fetch models'}
-                </button>
-              )}
+              <button
+                type="button"
+                className="flex items-center gap-1 text-[10px] text-ink-500 hover:text-[var(--color-accent)]"
+                onClick={handleFetchModels}
+                disabled={loading}
+              >
+                {loading ? (
+                  <Loader2 size={10} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={10} />
+                )}
+                {isLocal
+                  ? (isZh ? '刷新已安装' : 'Refresh installed')
+                  : (isZh ? '拉取模型列表' : 'Fetch models')}
+              </button>
             </div>
             {provider.models.length > 0 ? (
               <Select
@@ -176,6 +203,12 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
                 }}
                 compact
               />
+            ) : isLocal ? (
+              <p className="text-[11px] leading-relaxed text-ink-500">
+                {isZh
+                  ? '请先在上方 Ollama 面板拉取 preset 模型，拉取后会出现在这里。'
+                  : 'Pull a preset model in the Ollama panel above first; installed models appear here.'}
+              </p>
             ) : (
               <input
                 value={provider.selectedModel}

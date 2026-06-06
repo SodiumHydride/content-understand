@@ -187,8 +187,26 @@ def rotate_request(
             raise RateLimitError(f"[{label}] 429 rate limit")
 
         if r.status_code >= 500:
-            logger.warning("[%s] HTTP %d on key ...%s", label, r.status_code, key[-4:])
-            raise requests.ConnectionError(f"[{label}] HTTP {r.status_code}")
+            detail = (r.text or "")[:500]
+            logger.error(
+                "[%s] HTTP %d on key ...%s: %s",
+                label,
+                r.status_code,
+                key[-4:],
+                detail,
+            )
+            is_local = (
+                key == "local"
+                or "127.0.0.1" in req_url
+                or "localhost" in req_url
+            )
+            if is_local:
+                raise RuntimeError(
+                    f"[{label}] HTTP {r.status_code}: {detail or 'server error'}"
+                )
+            raise requests.ConnectionError(
+                f"[{label}] HTTP {r.status_code}: {detail or 'server error'}"
+            )
 
         # 4xx non-429: do not retry
         raise RuntimeError(f"[{label}] HTTP {r.status_code}: {r.text[:300]}")

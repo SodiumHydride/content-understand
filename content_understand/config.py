@@ -92,16 +92,18 @@ class ContentConfig(BaseModel):
     # -- Output --
     output: OutputConfig = Field(default_factory=OutputConfig)
 
-    # -- Custom prompt override --
+    # -- Language & prompt --
+    output_language: str = "zh"  # "zh" | "en"
     prompt_template: str = ""
 
     def get_backend(self, name: str) -> BackendConfig:
-        """Get a backend config by name. Falls back to first available."""
+        """Get a backend config by name. Raises if missing."""
         if name in self.backends:
             return self.backends[name]
-        if self.backends:
-            return next(iter(self.backends.values()))
-        return BackendConfig()
+        known = ", ".join(sorted(self.backends)) or "(none)"
+        raise KeyError(
+            f"Backend '{name}' is not configured. Available backends: {known}"
+        )
 
     def backend_for_content_type(self, content_type: str) -> tuple[str, BackendConfig]:
         """Return (backend_name, BackendConfig) for a given content type."""

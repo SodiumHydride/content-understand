@@ -17,6 +17,7 @@ class ArticleModel(ABC):
         url: str = "",
         prompt: str = "",
         timeout: int = 120,
+        language: str = "zh",
     ) -> str:
         """Understand article text and return structured analysis.
 

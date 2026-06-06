@@ -13,7 +13,8 @@ from content_understand.models.article_base import ArticleModel
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_ARTICLE_PROMPT = """请详细分析以下文章内容，输出结构化摘要。
+_DEFAULT_ARTICLE_PROMPT: dict[str, str] = {
+    "zh": """请详细分析以下文章内容，输出结构化摘要。
 
 标题：{title}
 来源：{url}
@@ -35,7 +36,31 @@ _DEFAULT_ARTICLE_PROMPT = """请详细分析以下文章内容，输出结构化
 - 给出 5-10 个相关标签，格式：#标签1 #标签2 ...
 
 ## 总结
-- 用 2-3 句话总结文章主旨"""
+- 用 2-3 句话总结文章主旨""",
+    "en": """Analyze the following article and output a structured summary.
+
+Title: {title}
+Source: {url}
+
+Article content:
+```
+{text}
+```
+
+Output in the following structure:
+
+## Key Points
+- List core points (3-8 items)
+
+## Detailed Content
+- Expand by argument or theme
+
+## Tags
+- Give 5-10 relevant tags, format: #tag1 #tag2 ...
+
+## Conclusion
+- Summarize the article's core message in 2-3 sentences""",
+}
 
 
 class OpenAICompatArticleModel(ArticleModel):
@@ -61,13 +86,15 @@ class OpenAICompatArticleModel(ArticleModel):
         url: str = "",
         prompt: str = "",
         timeout: int = 120,
+        language: str = "zh",
     ) -> str:
         max_chars = 60000
         if len(text) > max_chars:
             text = text[:max_chars] + "\n\n[... text truncated ...]"
 
         if not prompt:
-            prompt = _DEFAULT_ARTICLE_PROMPT.format(title=title, url=url, text=text)
+            template = _DEFAULT_ARTICLE_PROMPT.get(language, _DEFAULT_ARTICLE_PROMPT["zh"])
+            prompt = template.format(title=title, url=url, text=text)
 
         body = {
             "model": self.model_name,

@@ -92,10 +92,26 @@
       "thinking": "思考",
       "wiki": "Wiki"
     },
-    "scratchDefault": "新想法…",
+    "textPlaceholder": "直接输入…",
+    "toolBar": "画布工具",
+    "toolSize": "粗细",
+    "textSize": "字号",
+    "tool": {
+      "select": "选择",
+      "text": "文字",
+      "pen": "画笔",
+      "highlighter": "荧光笔",
+      "eraser": "橡皮",
+      "image": "图片"
+    },
+    "eraser": {
+      "partial": "擦除",
+      "stroke": "整笔删除"
+    },
     "canvasNav": "滚轮平移 · ⌘滚轮缩放 · 中键或空格+拖动画布",
+    "canvasNavThinking": "V 选择 · T 文字 · P 画笔 · H 荧光 · E 橡皮 · I 图片 · 空格拖动",
     "canvasTip": {
-      "thinking": "双击空白添加便签 · 右键或 ⌘N",
+      "thinking": "文字：点击输入 · 画笔/荧光：拖动绘制 · 图片：粘贴或 I 键 · 空格+拖平移",
       "wiki": "单击选中节点 · 双击阅读全文"
     },
     "peek": {
@@ -104,8 +120,11 @@
       "dismiss": "取消选中"
     },
     "menu": {
-      "newScratch": "添加空白便签",
-      "newScratchShortcut": "⌘N",
+      "addTextHere": "在此输入文字",
+      "editText": "编辑文字",
+      "deleteText": "删除文字",
+      "deleteElement": "删除",
+      "replaceImage": "替换图片",
       "readNote": "阅读笔记",
       "wikiCanvasLabel": "Wiki 图谱",
       "editLinks": "编辑此笔记的链接",
@@ -114,7 +133,7 @@
     "empty": "导图还是空的",
     "emptyHint": "先在「收录」添加笔记，再回来摆放",
     "emptyDetail": {
-      "thinking": "拖曳摆位；空白处双击/右键/⌘N 加便签；可任意方向平移画布",
+      "thinking": "没有收录笔记也能直接在画布上写字、画画；收录后会显示为参考节点",
       "wiki": "单击选中节点；双击或右键阅读。链接由应用管理（即将支持）"
     }
   },
@@ -178,19 +197,23 @@
     "languageSystem": "跟随系统",
     "languageZh": "中文",
     "languageEn": "English",
+    "outputLanguage": "AI 输出语言",
+    "promptTemplate": "自定义 Prompt（可选）",
+    "promptTemplatePlaceholder": "留空使用默认 prompt，填写后将覆盖默认值",
+    "promptTemplateHint": "支持 Markdown。留空则根据输出语言自动选择默认 prompt。",
     "vaultPath": "笔记库（应用内）",
     "vaultHint": "Wiki 与笔记保存在应用数据目录，不占用你手动选的 C/D 盘路径。可随时导出 .md。",
     "vaultOpen": "打开笔记库文件夹",
     "vaultExportAll": "导出全部 Markdown",
-    "modelsHint": "云端填 OpenAI 兼容 Base URL。本地引擎由应用自动下载 Gemma 4 GGUF preset 并启动 llama-server（或检测本机 Ollama）。",
+    "modelsHint": "云端填 OpenAI 兼容 Base URL。本地推理使用 Ollama + 目录 preset；应用可下载独立 Ollama 到应用数据目录。",
     "inferenceMode": "理解优先级",
     "inferencePreferApi": "优先云端 API",
     "inferencePreferLocal": "优先本地引擎",
     "inferenceLocalOnly": "仅本地",
     "inferenceApiOnly": "仅云端（不下载模型）",
-    "localPreset": "本地模型 preset",
-    "prepareLocalEngine": "准备本地引擎（下载 preset）",
-    "useOllamaIfAvailable": "若已安装 Ollama，优先使用（高级）",
+    "localPreset": "本地 preset",
+    "prepareLocalEngine": "准备本地引擎（下载 Ollama + preset）",
+    "useOllamaIfAvailable": "优先连接系统 Ollama（仍可管理目录内模型）",
     "runtimeState": "本地引擎状态",
     "downloadedModels": "已下载模型",
     "noModels": "暂无已下载的本地模型",
@@ -209,7 +232,7 @@
     "articleBackend": "文章",
     "backendMimo": "MiMo API",
     "backendOpenAI": "云端 OpenAI 兼容",
-    "backendLocal": "本地（Ollama / llama.cpp）",
+    "backendLocal": "本地（Ollama preset）",
     "backendGemini": "Google Gemini",
     "backendClaude": "Anthropic Claude",
     "mimoKeys": "MiMo API Keys",
@@ -220,9 +243,6 @@
     "cookiesPath": "B 站 Cookies（可选）",
     "cacheDir": "缓存（应用内）",
     "modelsDir": "模型目录（应用内）",
-    "huggingFaceModelId": "Hugging Face 模型 ID",
-    "huggingFacePlaceholder": "例如 Qwen/Qwen2-VL-7B-Instruct",
-    "huggingFaceSoon": "一键从 Hugging Face 拉取权重：即将支持",
     "save": "保存",
     "saved": "已保存",
     "saveFailed": "保存失败 — 引擎可能未连接",

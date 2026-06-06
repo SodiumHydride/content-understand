@@ -11,6 +11,11 @@ from content_understand.models.base import VideoModel
 logger = logging.getLogger(__name__)
 
 
+def _mimo_headers(key: str) -> dict[str, str]:
+    """MiMo uses 'api-key' header instead of 'Authorization: Bearer'."""
+    return {"api-key": key, "Content-Type": "application/json"}
+
+
 class MimoModel(VideoModel):
     """MiMo video understanding backend with multi-key rotation."""
 
@@ -24,7 +29,8 @@ class MimoModel(VideoModel):
 
     def _post(self, body: dict, timeout: int, label: str) -> str:
         return rotate_request(
-            self.api_base, body, self.rotator, timeout, f"mimo:{label}"
+            self.api_base, body, self.rotator, timeout, f"mimo:{label}",
+            headers_factory=_mimo_headers,
         )
 
     def understand_video(
@@ -34,6 +40,7 @@ class MimoModel(VideoModel):
         prompt: str = "",
         fps: float = 2.0,
         timeout: int = 120,
+        language: str = "zh",
     ) -> str:
         if not video_url and not video_path:
             raise ValueError("Either video_url or video_path is required")
@@ -56,14 +63,15 @@ class MimoModel(VideoModel):
                     "content": [
                         {
                             "type": "video_url",
-                            "video_url": {"url": video_url, "fps": fps},
+                            "video_url": {"url": video_url},
+                            "fps": fps,
+                            "media_resolution": "default",
                         },
                         {"type": "text", "text": prompt},
                     ],
                 }
             ],
-            "max_tokens": self.max_tokens,
-            "thinking": {"type": "disabled"},
+            "max_completion_tokens": self.max_tokens,
         }
 
         return self._post(body, timeout, "video")
@@ -72,7 +80,7 @@ class MimoModel(VideoModel):
         body = {
             "model": self.model_text,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": self.max_tokens,
+            "max_completion_tokens": self.max_tokens,
         }
         return self._post(body, timeout, "text")
 

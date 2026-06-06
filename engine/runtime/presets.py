@@ -1,4 +1,4 @@
-"""Load curated GGUF presets and map hardware → recommendation."""
+"""Load curated Ollama model presets and map hardware → recommendation."""
 
 from __future__ import annotations
 
@@ -66,34 +66,24 @@ def recommend_preset(hw: HardwareProfile) -> dict[str, Any]:
         min_unified = p.get("min_unified_memory_gb", 0)
 
         if unified:
-            # Apple Silicon: unified memory counts for both
             if min_unified and ram < min_unified:
                 continue
             if ram < min_ram:
                 continue
         else:
-            # Discrete GPU: check if VRAM alone can satisfy the model
-            # For GPU-accelerated presets, VRAM is the real constraint.
-            # Use max(min_ram, min_vram) as effective requirement,
-            # but if VRAM is sufficient, don't block on RAM alone.
             if min_vram and vram >= min_vram:
-                # GPU can handle the model — RAM check relaxed
-                # (system RAM just needs to hold the OS + mmap overhead)
                 pass
             elif ram < min_ram:
                 continue
 
-        # CPU-only: only cpu_recommended presets
         if hw.cpu_only and not p.get("cpu_recommended", False):
             continue
 
         eligible.append(p)
 
     if not eligible:
-        # Fallback: pick the smallest preset
         return _pick_smallest(presets)
 
-    # Score: tier rank (desc) → modality count (desc) → download size (asc)
     def _score(p: dict) -> tuple:
         tier = _TIER_RANK.get(p.get("tier", ""), -1)
         modality_count = len(p.get("modalities", []))
@@ -105,7 +95,6 @@ def recommend_preset(hw: HardwareProfile) -> dict[str, Any]:
 
 
 def _pick_smallest(presets: list[dict]) -> dict[str, Any]:
-    """Fallback: pick the smallest preset."""
     if not presets:
         return {}
     return min(presets, key=lambda p: p.get("download_size_gb", 999))
@@ -127,12 +116,15 @@ def recommendation_summary(hw: HardwareProfile, preset: dict[str, Any], lang: st
 
     label = preset.get("label_zh" if lang == "zh" else "label_en", preset.get("id", ""))
     modalities = ", ".join(preset.get("modalities", []))
-    download = preset.get("download_size_gb", 0)
+    ollama_model = preset.get("ollama_model", "")
     lines.append(f"推荐: {label}")
-    lines.append(f"模态: {modalities} | 下载: {download:.1f} GB")
-
-    mmproj_note = notes.get("no_mmproj_zh" if lang == "zh" else "no_mmproj_en", "")
-    if mmproj_note:
-        lines.append(mmproj_note)
+    lines.append(f"模态: {modalities}")
+    if ollama_model:
+        lines.append(f"Ollama 模型: {ollama_model}")
 
     return "\n".join(x for x in lines if x)
+
+
+def suggest_ollama_pull(preset: dict) -> str | None:
+    name = preset.get("ollama_model")
+    return f"ollama pull {name}" if name else None

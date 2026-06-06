@@ -40,7 +40,7 @@ engine/                # App-specific engine bridge + runtime
   understand/          # Orchestration: app config → engine pipeline
   write/               # Markdown vault writer
   index/               # SQLite cache over vault
-  runtime/             # Local llama.cpp lifecycle (download, launch, health)
+  runtime/             # Ollama lifecycle + curated preset catalog
 sidecar/               # HTTP API for Electron (FastAPI, port 17890)
 src/                   # Electron + React frontend
 ```
@@ -52,25 +52,30 @@ Per modality (video / image / audio / article):
 | Backend | Use case |
 |---------|----------|
 | **Cloud OpenAI-compatible** | OpenRouter, DeepSeek, Moonshot, custom endpoint + API key |
-| **Local OpenAI-compatible** | Ollama, llama.cpp server, LM Studio (`/v1/chat/completions`) |
+| **Local Ollama (presets)** | App-managed or system Ollama — **catalog presets only** |
 | **MiMo** | Video, image, audio, article — native API |
 | **Gemini** | Audio — Google AI Studio (up to 9.5h) |
 | **Claude** | Image — Anthropic Messages API |
 
-Hugging Face one-click weights: planned (`models/` dir reserved under app data).
+### Local runtime (Ollama)
 
-### Local runtime (llama.cpp, macOS + Windows)
+Two instances, cleanly separated:
 
-The sidecar can **download official llama.cpp binaries** (release `b9484`) and **curated GGUF presets** into app data, then start `llama-server` automatically.
+| Instance | Port | Binary | Models | Uninstall |
+|----------|------|--------|--------|-----------|
+| **App Ollama** | 11435 | `{appData}/runtime/ollama/` | `{appData}/models/` | Removed with "Delete all data" |
+| **System Ollama** | 11434 | User install (PATH) | User's `~/.ollama` | Never removed by the app |
 
-**Dev tests** (from repo root, with `pip install -r requirements.txt`):
+The app downloads Ollama into its own storage when needed. Presets in `engine/runtime/presets.json` map to `ollama pull` targets (Qwen2.5-VL, Gemma 4, MiniCPM-V, etc.). Only catalog models can be pulled, selected, or deleted from the UI.
 
-```bash
-python3 scripts/test_runtime.py
-python3 scripts/test_runtime_full.py --bin-only
-python3 scripts/test_platform_assets.py   # mac/win/linux release URLs
-python3 scripts/test_runtime_full.py --preset gemma4-e2b-lite
-```
+Settings → Models:
+
+1. **Download app Ollama** (one-time, into app data)
+2. Pick a **hardware-recommended preset**
+3. **Pull** the preset model
+4. Set inference mode to prefer local / local only
+
+If the user already runs system Ollama, enable **Prefer system Ollama** — the app connects to port 11434 and still only exposes catalog models for pull/delete/select.
 
 ## Export
 

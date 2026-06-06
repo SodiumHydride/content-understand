@@ -1,362 +1,191 @@
 {
-  "version": 3,
-  "llama_min_version": "b9484",
+  "version": 6,
   "presets": [
+    {
+      "id": "gemma4-e4b",
+      "tier": "cpu_lite",
+      "min_ram_gb": 8,
+      "min_vram_gb": 0,
+      "min_unified_memory_gb": 8,
+      "download_size_gb": 3.5,
+      "modalities": ["article", "image", "video", "audio"],
+      "omni": true,
+      "cpu_recommended": true,
+      "gpu_recommended": false,
+      "label_zh": "轻量全模态 · Gemma 4 E4B（4B，CPU 可跑，文本+图像+视频+音频）",
+      "label_en": "Lite Omni · Gemma 4 E4B (4B, CPU-friendly, text+image+video+audio)",
+      "ollama_model": "gemma4:e4b"
+    },
+    {
+      "id": "gemma4-12b",
+      "tier": "quality",
+      "min_ram_gb": 16,
+      "min_vram_gb": 0,
+      "min_unified_memory_gb": 16,
+      "download_size_gb": 8.5,
+      "modalities": ["article", "image", "video", "audio"],
+      "omni": true,
+      "cpu_recommended": false,
+      "gpu_recommended": true,
+      "label_zh": "全模态 · Gemma 4 12B（encoder-free，文本+图像+视频+音频）",
+      "label_en": "Omni · Gemma 4 12B (encoder-free, text+image+video+audio)",
+      "ollama_model": "gemma4:12b"
+    },
+    {
+      "id": "minicpm-o2.6",
+      "tier": "balanced",
+      "min_ram_gb": 12,
+      "min_vram_gb": 6,
+      "download_size_gb": 5.5,
+      "modalities": ["article", "image", "video", "audio"],
+      "omni": true,
+      "cpu_recommended": false,
+      "gpu_recommended": true,
+      "label_zh": "全模态 · MiniCPM-o 2.6（轻量，文本+图像+视频+音频）",
+      "label_en": "Omni · MiniCPM-o 2.6 (lightweight, text+image+video+audio)",
+      "ollama_model": "openbmb/minicpm-o2.6"
+    },
+    {
+      "id": "moondream",
+      "tier": "ultra_lite",
+      "min_ram_gb": 4,
+      "min_vram_gb": 0,
+      "download_size_gb": 1.7,
+      "modalities": ["article", "image"],
+      "cpu_recommended": true,
+      "gpu_recommended": false,
+      "label_zh": "极轻量 · Moondream 2（图像理解，1.7GB）",
+      "label_en": "Ultra Lite · Moondream 2 (image, 1.7GB)",
+      "ollama_model": "moondream"
+    },
+    {
+      "id": "gemma3-1b",
+      "tier": "ultra_lite",
+      "min_ram_gb": 4,
+      "min_vram_gb": 0,
+      "download_size_gb": 0.8,
+      "modalities": ["article", "image"],
+      "cpu_recommended": true,
+      "gpu_recommended": false,
+      "label_zh": "极轻量 · Gemma 3 1B（文本+图像，800MB）",
+      "label_en": "Ultra Lite · Gemma 3 1B (text+image, 800MB)",
+      "ollama_model": "gemma3:1b"
+    },
+    {
+      "id": "qwen2-vl-2b",
+      "tier": "cpu_lite",
+      "min_ram_gb": 8,
+      "min_vram_gb": 0,
+      "download_size_gb": 1.5,
+      "modalities": ["article", "image", "video"],
+      "cpu_recommended": true,
+      "gpu_recommended": false,
+      "label_zh": "轻量视觉 · Qwen2-VL 2B（图像+视频，中文强）",
+      "label_en": "Lite Vision · Qwen2-VL 2B (image+video, strong Chinese)",
+      "ollama_model": "qwen2-vl:2b"
+    },
+    {
+      "id": "gemma3-4b",
+      "tier": "cpu_lite",
+      "min_ram_gb": 8,
+      "min_vram_gb": 0,
+      "download_size_gb": 3.3,
+      "modalities": ["article", "image", "video"],
+      "cpu_recommended": true,
+      "gpu_recommended": false,
+      "label_zh": "轻量视觉 · Gemma 3 4B（图像+视频，Google 出品）",
+      "label_en": "Lite Vision · Gemma 3 4B (image+video, by Google)",
+      "ollama_model": "gemma3:4b"
+    },
+    {
+      "id": "llava-7b",
+      "tier": "balanced",
+      "min_ram_gb": 12,
+      "min_vram_gb": 6,
+      "download_size_gb": 4.7,
+      "modalities": ["article", "image"],
+      "cpu_recommended": false,
+      "gpu_recommended": true,
+      "label_zh": "经典视觉 · LLaVA 7B（图像理解，成熟稳定）",
+      "label_en": "Classic Vision · LLaVA 7B (image, mature & stable)",
+      "ollama_model": "llava:7b"
+    },
+    {
+      "id": "minicpm-v",
+      "tier": "balanced",
+      "min_ram_gb": 12,
+      "min_vram_gb": 6,
+      "download_size_gb": 5.5,
+      "modalities": ["article", "image", "video"],
+      "cpu_recommended": false,
+      "gpu_recommended": true,
+      "label_zh": "视频理解 · MiniCPM-V（图像+视频，OCR 强）",
+      "label_en": "Video · MiniCPM-V (image+video, strong OCR)",
+      "ollama_model": "minicpm-v:latest"
+    },
+    {
+      "id": "qwen2-vl-7b",
+      "tier": "balanced",
+      "min_ram_gb": 12,
+      "min_vram_gb": 6,
+      "download_size_gb": 5.5,
+      "modalities": ["article", "image", "video"],
+      "cpu_recommended": false,
+      "gpu_recommended": true,
+      "label_zh": "视觉 · Qwen2-VL 7B（图像+视频，中文生态最成熟）",
+      "label_en": "Vision · Qwen2-VL 7B (image+video, best Chinese ecosystem)",
+      "ollama_model": "qwen2-vl:7b"
+    },
+    {
+      "id": "gemma3-12b",
+      "tier": "quality",
+      "min_ram_gb": 16,
+      "min_vram_gb": 0,
+      "download_size_gb": 8.0,
+      "modalities": ["article", "image", "video"],
+      "cpu_recommended": false,
+      "gpu_recommended": true,
+      "label_zh": "高质量 · Gemma 3 12B（图像+视频，推荐 16GB+ 内存）",
+      "label_en": "Quality · Gemma 3 12B (image+video, 16GB+ RAM)",
+      "ollama_model": "gemma3:12b"
+    },
+    {
+      "id": "llama3.2-vision",
+      "tier": "quality",
+      "min_ram_gb": 16,
+      "min_vram_gb": 8,
+      "download_size_gb": 7.8,
+      "modalities": ["article", "image"],
+      "cpu_recommended": false,
+      "gpu_recommended": true,
+      "label_zh": "Meta 视觉 · Llama 3.2 Vision 11B（图像理解）",
+      "label_en": "Meta Vision · Llama 3.2 Vision 11B (image)",
+      "ollama_model": "llama3.2-vision:11b"
+    },
     {
       "id": "smolvlm2-2.2b",
       "tier": "ultra_lite",
       "min_ram_gb": 4,
       "min_vram_gb": 0,
       "download_size_gb": 1.7,
-      "modalities": ["article", "image", "video"],
-      "cpu_recommended": true,
-      "gpu_recommended": false,
-      "label_zh": "超轻量 · SmolVLM2 2.2B（图像+视频，极低资源）",
-      "label_en": "Ultra Lite · SmolVLM2 2.2B (image+video, minimal resources)",
-      "files": [
-        {
-          "repo_id": "ggml-org/SmolVLM2-2.2B-Instruct-GGUF",
-          "filename": "SmolVLM2-2.2B-Instruct-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "ggml-org/SmolVLM2-2.2B-Instruct-GGUF",
-          "filename": "mmproj-SmolVLM2-2.2B-Instruct-Q8_0.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "smolvlm",
-        "ctx_size": 8192,
-        "n_gpu_layers": 0
-      },
-      "ollama_model": ""
-    },
-    {
-      "id": "qwen2.5-vl-3b",
-      "legacy_ids": [],
-      "tier": "cpu_lite",
-      "min_ram_gb": 8,
-      "min_vram_gb": 0,
-      "download_size_gb": 2.7,
-      "modalities": ["article", "image"],
-      "cpu_recommended": true,
-      "gpu_recommended": false,
-      "label_zh": "轻量视觉 · Qwen2.5-VL 3B（图像理解，中文强）",
-      "label_en": "Lite Vision · Qwen2.5-VL 3B (image, strong Chinese)",
-      "files": [
-        {
-          "repo_id": "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF",
-          "filename": "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF",
-          "filename": "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "chatml",
-        "ctx_size": 8192,
-        "n_gpu_layers": 0
-      },
-      "ollama_model": ""
-    },
-    {
-      "id": "gemma4-e2b-lite",
-      "legacy_ids": ["gemma4-1b-article"],
-      "tier": "cpu_lite",
-      "min_ram_gb": 8,
-      "min_vram_gb": 0,
-      "download_size_gb": 3.5,
       "modalities": ["article"],
       "cpu_recommended": true,
       "gpu_recommended": false,
-      "label_zh": "轻量 · Gemma 4 E2B（主要文本）",
-      "label_en": "Lite · Gemma 4 E2B (text-first)",
-      "files": [
-        {
-          "repo_id": "ggml-org/gemma-4-E2B-it-GGUF",
-          "filename": "gemma-4-E2B-it-Q8_0.gguf"
-        }
-      ],
-      "llama": {
-        "chat_template": "gemma",
-        "ctx_size": 8192,
-        "n_gpu_layers": 0
-      },
-      "ollama_model": "gemma4:e2b"
-    },
-    {
-      "id": "voxtral-mini-3b",
-      "tier": "cpu_lite",
-      "min_ram_gb": 8,
-      "min_vram_gb": 0,
-      "download_size_gb": 3.2,
-      "modalities": ["audio"],
-      "cpu_recommended": true,
-      "gpu_recommended": false,
-      "label_zh": "轻量音频 · Voxtral Mini 3B（语音转录+理解）",
-      "label_en": "Lite Audio · Voxtral Mini 3B (speech transcription + understanding)",
-      "files": [
-        {
-          "repo_id": "ggml-org/Voxtral-Mini-3B-2507-GGUF",
-          "filename": "Voxtral-Mini-3B-2507-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "ggml-org/Voxtral-Mini-3B-2507-GGUF",
-          "filename": "mmproj-Voxtral-Mini-3B-2507-Q8_0.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "chatml",
-        "ctx_size": 8192,
-        "n_gpu_layers": 0
-      },
-      "ollama_model": ""
-    },
-    {
-      "id": "gemma4-e4b-balanced",
-      "legacy_ids": ["gemma4-4b-balanced"],
-      "tier": "cpu_balanced",
-      "min_ram_gb": 12,
-      "min_vram_gb": 4,
-      "download_size_gb": 5.5,
-      "modalities": ["article", "image"],
-      "cpu_recommended": true,
-      "gpu_recommended": true,
-      "label_zh": "均衡 · Gemma 4 E4B",
-      "label_en": "Balanced · Gemma 4 E4B",
-      "files": [
-        {
-          "repo_id": "ggml-org/gemma-4-E4B-it-GGUF",
-          "filename": "gemma-4-E4B-it-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "ggml-org/gemma-4-E4B-it-GGUF",
-          "filename": "mmproj-gemma-4-E4B-it-bf16.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "gemma",
-        "ctx_size": 8192,
-        "n_gpu_layers": 99
-      },
-      "ollama_model": "gemma4:e4b"
-    },
-    {
-      "id": "minicpm-v-4.5",
-      "tier": "balanced",
-      "min_ram_gb": 12,
-      "min_vram_gb": 6,
-      "download_size_gb": 6.1,
-      "modalities": ["article", "image", "video"],
-      "cpu_recommended": false,
-      "gpu_recommended": true,
-      "label_zh": "视频理解 · MiniCPM-V 4.5（图像+视频，10FPS）",
-      "label_en": "Video · MiniCPM-V 4.5 (image+video, 10FPS)",
-      "files": [
-        {
-          "repo_id": "openbmb/MiniCPM-V-4_5-gguf",
-          "filename": "MiniCPM-V-4_5-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "openbmb/MiniCPM-V-4_5-gguf",
-          "filename": "mmproj-model-f16.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "chatml",
-        "ctx_size": 32768,
-        "n_gpu_layers": 99
-      },
-      "ollama_model": ""
-    },
-    {
-      "id": "qwen2.5-vl-7b",
-      "tier": "balanced",
-      "min_ram_gb": 12,
-      "min_vram_gb": 6,
-      "download_size_gb": 5.5,
-      "modalities": ["article", "image"],
-      "cpu_recommended": false,
-      "gpu_recommended": true,
-      "label_zh": "视觉 · Qwen2.5-VL 7B（图像理解，生态最成熟）",
-      "label_en": "Vision · Qwen2.5-VL 7B (image, best ecosystem)",
-      "files": [
-        {
-          "repo_id": "ggml-org/Qwen2.5-VL-7B-Instruct-GGUF",
-          "filename": "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "ggml-org/Qwen2.5-VL-7B-Instruct-GGUF",
-          "filename": "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "chatml",
-        "ctx_size": 32768,
-        "n_gpu_layers": 99
-      },
-      "ollama_model": ""
-    },
-    {
-      "id": "internvl3-8b",
-      "tier": "balanced",
-      "min_ram_gb": 12,
-      "min_vram_gb": 6,
-      "download_size_gb": 5.0,
-      "modalities": ["article", "image"],
-      "cpu_recommended": false,
-      "gpu_recommended": true,
-      "label_zh": "文档 OCR · InternVL3 8B（文档/表格/图表理解）",
-      "label_en": "Document OCR · InternVL3 8B (doc/table/chart understanding)",
-      "files": [
-        {
-          "repo_id": "ggml-org/InternVL3-8B-Instruct-GGUF",
-          "filename": "InternVL3-8B-Instruct-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "ggml-org/InternVL3-8B-Instruct-GGUF",
-          "filename": "mmproj-InternVL3-8B-Instruct-Q8_0.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "chatml",
-        "ctx_size": 32768,
-        "n_gpu_layers": 99
-      },
-      "ollama_model": ""
-    },
-    {
-      "id": "qwen2.5-omni-7b",
-      "tier": "balanced",
-      "min_ram_gb": 16,
-      "min_vram_gb": 8,
-      "download_size_gb": 6.2,
-      "modalities": ["article", "image", "audio"],
-      "cpu_recommended": false,
-      "gpu_recommended": true,
-      "label_zh": "图像+音频 · Qwen2.5-Omni 7B（双模态输入）",
-      "label_en": "Image+Audio · Qwen2.5-Omni 7B (dual-modality input)",
-      "files": [
-        {
-          "repo_id": "ggml-org/Qwen2.5-Omni-7B-GGUF",
-          "filename": "Qwen2.5-Omni-7B-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "ggml-org/Qwen2.5-Omni-7B-GGUF",
-          "filename": "mmproj-Qwen2.5-Omni-7B-Q8_0.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "chatml",
-        "ctx_size": 32768,
-        "n_gpu_layers": 99
-      },
-      "ollama_model": ""
-    },
-    {
-      "id": "gemma4-12b-multimodal",
-      "tier": "quality",
-      "min_ram_gb": 16,
-      "min_vram_gb": 0,
-      "min_unified_memory_gb": 16,
-      "download_size_gb": 8.5,
-      "modalities": ["article", "image", "audio", "video"],
-      "cpu_recommended": false,
-      "gpu_recommended": true,
-      "label_zh": "高质量 · Gemma 4 12B 多模态（推荐 16GB+ 内存）",
-      "label_en": "Quality · Gemma 4 12B multimodal (16GB+ RAM)",
-      "files": [
-        {
-          "repo_id": "ggml-org/gemma-4-12B-it-GGUF",
-          "filename": "gemma-4-12B-it-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "ggml-org/gemma-4-12B-it-GGUF",
-          "filename": "mmproj-gemma-4-12B-it-bf16.gguf"
-        }
-      ],
-      "llama": {
-        "chat_template": "gemma",
-        "ctx_size": 8192,
-        "n_gpu_layers": 99
-      },
-      "ollama_model": "gemma4:12b"
-    },
-    {
-      "id": "minicpm-o-4.5",
-      "tier": "quality",
-      "min_ram_gb": 16,
-      "min_vram_gb": 8,
-      "download_size_gb": 6.1,
-      "modalities": ["article", "image", "video", "audio"],
-      "cpu_recommended": false,
-      "gpu_recommended": true,
-      "label_zh": "全能 · MiniCPM-o 4.5（图像+视频+音频+TTS）",
-      "label_en": "Omni · MiniCPM-o 4.5 (image+video+audio+TTS)",
-      "files": [
-        {
-          "repo_id": "openbmb/MiniCPM-o-4_5-gguf",
-          "filename": "MiniCPM-o-4_5-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "openbmb/MiniCPM-o-4_5-gguf",
-          "filename": "mmproj-model-f16.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "chatml",
-        "ctx_size": 32768,
-        "n_gpu_layers": 99
-      },
-      "ollama_model": ""
-    },
-    {
-      "id": "qwen3-omni-30b-a3b",
-      "tier": "high_quality",
-      "min_ram_gb": 24,
-      "min_vram_gb": 16,
-      "download_size_gb": 20.0,
-      "modalities": ["article", "image", "video", "audio"],
-      "cpu_recommended": false,
-      "gpu_recommended": true,
-      "label_zh": "旗舰全能 · Qwen3-Omni 30B-A3B（图像+视频+音频，MoE 高效）",
-      "label_en": "Flagship Omni · Qwen3-Omni 30B-A3B (image+video+audio, MoE)",
-      "files": [
-        {
-          "repo_id": "ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF",
-          "filename": "Qwen3-Omni-30B-A3B-Instruct-Q4_K_M.gguf"
-        },
-        {
-          "repo_id": "ggml-org/Qwen3-Omni-30B-A3B-Instruct-GGUF",
-          "filename": "mmproj-Qwen3-Omni-30B-A3B-Instruct-Q8_0.gguf",
-          "optional": true
-        }
-      ],
-      "llama": {
-        "chat_template": "chatml",
-        "ctx_size": 32768,
-        "n_gpu_layers": 99
-      },
-      "ollama_model": ""
+      "label_zh": "纯文本 · SmolVLM2 2.2B（仅文本，极低资源）",
+      "label_en": "Text-only · SmolVLM2 2.2B (text-only, minimal resources)",
+      "ollama_model": "richardyoung/smolvlm2-2.2b-instruct",
+      "ollama_note_zh": "社区模型，仅支持文本",
+      "ollama_note_en": "Community model, text-only"
     }
   ],
   "hardware_notes": {
-    "cpu_only_zh": "纯 CPU 优先 E2B/E4B/3B 模型；7B+ 可运行但较慢，视频理解建议用云端 API。",
-    "cpu_only_en": "On CPU-only, prefer E2B/E4B/3B presets; 7B+ works but slow — use cloud API for video.",
-    "apple_silicon_zh": "Apple 芯片统一内存：≥16GB 可跑 12B Q4；≥24GB 可跑 Qwen3-Omni 30B。",
-    "apple_silicon_en": "Apple Silicon unified memory: 16GB+ runs 12B Q4; 24GB+ runs Qwen3-Omni 30B.",
-    "nvidia_zh": "NVIDIA 独显按 VRAM 分档：≥6GB 用 7B 模型；≥12GB 用 12B；≥16GB 可上 Qwen3-Omni。",
-    "nvidia_en": "NVIDIA: ≥6GB VRAM → 7B models; ≥12GB → 12B; ≥16GB → Qwen3-Omni.",
-    "no_mmproj_zh": "部分模型可不装 mmproj（纯文本模式仍可用）。mmproj 是多模态投影器，理解图片/音频需要它。",
-    "no_mmproj_en": "Some models work without mmproj (text-only mode). mmproj is the multimodal projector — needed for image/audio understanding."
+    "cpu_only_zh": "纯 CPU 优先 E2B/E4B/3B 模型；7B+ 可运行但较慢。",
+    "cpu_only_en": "On CPU-only, prefer E2B/E4B/3B presets; 7B+ works but slow.",
+    "apple_silicon_zh": "Apple 芯片统一内存：≥16GB 可跑 12B Q4。",
+    "apple_silicon_en": "Apple Silicon unified memory: 16GB+ runs 12B Q4.",
+    "nvidia_zh": "NVIDIA 独显按 VRAM 分档：≥6GB 用 7B 模型；≥12GB 用 12B。",
+    "nvidia_en": "NVIDIA: ≥6GB VRAM → 7B models; ≥12GB → 12B.",
+    "no_mmproj_zh": "Ollama 自动处理多模态，无需手动下载 mmproj。Gemma 4 E2B/E4B/12B 支持音频输入。",
+    "no_mmproj_en": "Ollama handles multimodal automatically, no mmproj needed. Gemma 4 E2B/E4B/12B support audio input."
   }
 }

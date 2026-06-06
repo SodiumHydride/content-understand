@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import mimetypes
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -21,90 +20,51 @@ _KINDS = ("video", "image", "audio", "article")
 def _ensure_local_ready(
     config: ContentConfig,
     on_progress: ProgressFn | None = None,
+    *,
+    prefer_user: bool = True,
 ) -> str | None:
-    """Ensure local inference is ready. Returns OpenAI-compatible base URL.
-
-    Priority:
-    1. Ollama (if running or can be started)
-    2. llama-server (legacy fallback)
-    """
-    # Try Ollama first
-    ollama_url = _try_ollama(on_progress)
-    if ollama_url:
-        return ollama_url
-
-    # Fallback to llama-server
+    """Ensure an Ollama instance is reachable. Returns OpenAI-compatible base URL."""
+    from engine.paths import app_data_root, models_dir
     from engine.runtime.manager import get_runtime_manager
+    from engine.runtime.ollama_manager import (
+        detect_app_ollama,
+        detect_user_ollama,
+        download_ollama,
+        find_app_binary,
+        get_shared_daemon,
+    )
 
     rt = get_runtime_manager()
+    rt.set_prefer_user_ollama(prefer_user)
 
-    if rt.state == "ready" and rt.local_base_url:
-        rt.touch()
-        return rt.local_base_url
+    if prefer_user and detect_user_ollama():
+        base = detect_user_ollama()
+        if base:
+            rt.mark_ollama_ready(base, "user")
+            return base
 
-    if rt.state == "working":
-        if on_progress:
-            on_progress("model", 5, "Waiting for local server to start...")
-        for _ in range(240):
-            if rt.state == "ready" and rt.local_base_url:
-                return rt.local_base_url
-            if rt.state == "error":
-                raise RuntimeError(f"Local engine failed: {rt.message}")
-            time.sleep(0.5)
-        raise RuntimeError("Local engine startup timeout (120s)")
+    if detect_app_ollama():
+        base = detect_app_ollama()
+        if base:
+            rt.mark_ollama_ready(base, "app")
+            return base
 
-    if rt.state == "idle":
-        from engine.runtime.presets import recommend_preset
-
-        rt.refresh_hardware()
-        preset = recommend_preset(rt.hardware)
-        if on_progress:
-            on_progress("model", 5, f"Starting local server ({preset.get('id', 'unknown')})...")
-        rt.setup_async(preset["id"], prefer_ollama=False)
-
-        for _ in range(240):
-            if rt.state == "ready" and rt.local_base_url:
-                return rt.local_base_url
-            if rt.state == "error":
-                raise RuntimeError(f"Local engine failed: {rt.message}")
-            time.sleep(0.5)
-        raise RuntimeError("Local engine startup timeout (120s)")
-
-    if rt.state == "error":
-        raise RuntimeError(f"Local engine in error state: {rt.message}")
-
-    return None
-
-
-def _try_ollama(on_progress: ProgressFn | None = None) -> str | None:
-    """Try to use Ollama for local inference. Returns base URL or None."""
-    from engine.runtime.ollama_manager import detect_existing_ollama, find_ollama_binary
-
-    from engine.paths import app_data_root
-
-    # Check if Ollama is already running
-    existing = detect_existing_ollama()
-    if existing:
-        return existing
-
-    # Try to start our Ollama
     runtime_dir = app_data_root() / "runtime"
-    binary = find_ollama_binary(runtime_dir)
-    if not binary:
-        return None  # Ollama not installed
+    if not find_app_binary(runtime_dir):
+        if on_progress:
+            on_progress("model", 5, "Downloading app Ollama...")
+        download_ollama(runtime_dir, on_progress=on_progress)
 
     if on_progress:
-        on_progress("model", 5, "Starting Ollama...")
+        on_progress("model", 10, "Starting app Ollama...")
 
-    from engine.runtime.ollama_manager import OllamaDaemon
-    from engine.paths import models_dir
-
-    daemon = OllamaDaemon()
+    daemon = get_shared_daemon()
     try:
         base = daemon.start(runtime_dir, models_dir())
+        rt.mark_ollama_ready(base, "app")
         return base
     except Exception as exc:
-        logger.warning("Failed to start Ollama: %s", exc)
+        logger.warning("Failed to start app Ollama: %s", exc)
         return None
 
 
@@ -124,30 +84,34 @@ def detect_kind(path: Path) -> str:
 
 
 def _build_pipeline(config: ContentConfig, on_progress: ProgressFn | None = None):
-    """Build a ContentPipeline from the app's ContentConfig.
-
-    If the config references local_server backends, ensures the local
-    inference server is ready before building the pipeline.
-    """
+    """Build a ContentPipeline from the app's ContentConfig."""
     from content_understand import ContentPipeline
     from content_understand.config import BackendConfig as EngineBackend
     from content_understand.config import ContentConfig as EngineConfig
 
-    # Check if any content type uses local_server — ensure it's running
     local_needed = any(
         getattr(config, f"{ct}_backend", "") == "local_server"
-        for ct in ("video", "image", "audio", "article")
+        for ct in _KINDS
     )
     if local_needed:
-        local_url = _ensure_local_ready(config, on_progress)
-        if local_url:
-            # Inject the actual local URL into local_server backend configs
-            for name, bc in config.backends.items():
-                if name == "local_server" or bc.type == "openai_compat":
-                    if "127.0.0.1" in bc.api_base:
-                        bc.api_base = local_url if local_url.endswith("/v1") else f"{local_url}/v1"
+        from engine.runtime.manager import get_runtime_manager
 
-    # Map app config -> engine config
+        prefer_user = get_runtime_manager().prefer_user_ollama()
+        local_url = _ensure_local_ready(config, on_progress, prefer_user=prefer_user)
+        if local_url:
+            bc = config.backends.get("local_server")
+            if bc:
+                bc.api_base = (
+                    local_url if local_url.endswith("/v1") else f"{local_url}/v1"
+                )
+        elif any(
+            getattr(config, f"{ct}_backend", "") == "local_server" for ct in _KINDS
+        ):
+            raise RuntimeError(
+                "Local Ollama is required but could not be started. "
+                "Check Settings → Ollama or switch inference mode."
+            )
+
     backends = {}
     for name, bc in config.backends.items():
         backends[name] = EngineBackend(
@@ -162,6 +126,16 @@ def _build_pipeline(config: ContentConfig, on_progress: ProgressFn | None = None
             extra=bc.extra,
         )
 
+    # Inject frame settings into backend extra dicts
+    frame_extra = {
+        "fps": config.frame_fps,
+        "max_frames": config.frame_max_frames,
+        "scale": config.frame_scale,
+        "strategy": config.frame_strategy,
+    }
+    for bc in backends.values():
+        bc.extra = {**frame_extra, **bc.extra}
+
     engine_config = EngineConfig(
         backends=backends,
         video_backend=config.video_backend,
@@ -170,6 +144,7 @@ def _build_pipeline(config: ContentConfig, on_progress: ProgressFn | None = None
         article_backend=config.article_backend,
         cache_dir=config.cache_dir,
         bilibili_cookies=config.bilibili_cookies,
+        output_language=config.output_language,
         prompt_template=config.prompt_template,
     )
 
@@ -182,6 +157,9 @@ def understand_path(
     kind: str | None = None,
     config: ContentConfig | None = None,
     on_progress: ProgressFn | None = None,
+    output_language: str | None = None,
+    prompt_template: str | None = None,
+    output_format: str = "text",
 ) -> dict[str, Any]:
     """Run understanding on an existing local file (no URL fetch)."""
     p = Path(path).expanduser().resolve()
@@ -190,7 +168,10 @@ def understand_path(
 
     content_kind = kind or detect_kind(p)
     cfg = config or ContentConfig()
-
+    if output_language:
+        cfg.output_language = output_language
+    if prompt_template:
+        cfg.prompt_template = prompt_template
     pipeline = _build_pipeline(cfg, on_progress)
 
     try:
@@ -198,6 +179,7 @@ def understand_path(
             str(p),
             content_type=content_kind,
             on_progress=on_progress,
+            output_format=output_format,
         )
         result["type"] = content_kind
         result["url"] = p.as_uri()
@@ -208,23 +190,42 @@ def understand_path(
         raise
 
 
+def _validate_ingest_url(url: str) -> None:
+    """Reject common malformed URLs before hitting downloaders."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url.strip())
+    host = (parsed.netloc or "").lower()
+    path = parsed.path or "/"
+
+    if host in ("www.bilibili.com", "bilibili.com", "m.bilibili.com") and path in ("", "/"):
+        raise ValueError(
+            "Bilibili homepage is not a video. Paste a video URL, e.g. "
+            "https://www.bilibili.com/video/BV1xxxxxxxxxx"
+        )
+
+    if host.endswith("bilibili.com") and "/video/" not in path and "b23.tv" not in host:
+        if "BV" not in url and "/av" not in path.lower():
+            raise ValueError(
+                "Unrecognized Bilibili URL. Use a /video/BV… link or a b23.tv short link."
+            )
+
+
 def understand_url(
     url: str,
     *,
     config: ContentConfig | None = None,
     on_progress: ProgressFn | None = None,
+    output_language: str | None = None,
+    prompt_template: str | None = None,
+    output_format: str = "text",
 ) -> dict[str, Any]:
-    """Fetch (optional extras) then understand."""
-    from engine.fetch import fetch_to_cache
-
+    """Resolve URL via ContentPipeline (Bilibili cookies/API fallbacks, yt-dlp, HTTP)."""
     cfg = config or ContentConfig()
-    cache = Path(cfg.cache_dir) if cfg.cache_dir else None
-
-    if on_progress:
-        on_progress("resolve", 10, "resolve url")
-        on_progress("download", 25, "download")
-
-    local = fetch_to_cache(url, cache_dir=cache, on_progress=on_progress)
-    result = understand_path(local, config=cfg, on_progress=on_progress)
-    result["url"] = url
-    return result
+    if output_language:
+        cfg.output_language = output_language
+    if prompt_template:
+        cfg.prompt_template = prompt_template
+    _validate_ingest_url(url)
+    pipeline = _build_pipeline(cfg, on_progress)
+    return pipeline.understand(url, on_progress=on_progress, output_format=output_format)

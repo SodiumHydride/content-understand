@@ -1,8 +1,17 @@
-"""Ollama binary management: download, start, stop, detect."""
+"""Ollama lifecycle: app-managed binary + optional user/system instance.
+
+Storage policy
+--------------
+* **App Ollama** — binary under ``{appData}/runtime/ollama/``, models under
+  ``{appData}/models/``, listens on ``OLLAMA_APP_PORT`` (11435). Removed with
+  "Delete all data" / app uninstall.
+* **User Ollama** — whatever the user installed (PATH / system service), default
+  port ``OLLAMA_USER_PORT`` (11434). We may list/pull/delete **catalog** models
+  only; we never remove the user's binary.
+"""
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import platform
@@ -11,22 +20,60 @@ import socket
 import subprocess
 import tarfile
 import tempfile
+import threading
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
-from urllib.request import Request, urlopen, urlretrieve
+from urllib.request import Request, urlopen
+
+from content_understand.defaults import OLLAMA_APP_BASE_URL, OLLAMA_APP_PORT, OLLAMA_USER_PORT
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_VERSION = "v0.30.5"
+OLLAMA_VERSION = "v0.30.6"
 OLLAMA_RELEASE_BASE = f"https://github.com/ollama/ollama/releases/download/{OLLAMA_VERSION}"
-DEFAULT_PORT = 11434
 
 ProgressFn = Callable[[str, int, str], None]
 
+_daemon: OllamaDaemon | None = None
+
+_download_lock = threading.Lock()
+_download_state: dict[str, object] = {"running": False, "error": None}
+
+
+def app_download_state() -> dict[str, object]:
+    with _download_lock:
+        return dict(_download_state)
+
+
+def start_app_ollama_download(runtime_dir: Path) -> dict[str, object]:
+    """Download app Ollama in a background thread so the sidecar stays responsive."""
+    with _download_lock:
+        if _download_state["running"]:
+            return {"ok": True, "status": "in_progress"}
+        if is_app_ollama_installed(runtime_dir):
+            return {
+                "ok": True,
+                "status": "already_installed",
+                "path": str(app_binary_path(runtime_dir)),
+            }
+        _download_state.update({"running": True, "error": None})
+
+    def _run() -> None:
+        try:
+            download_ollama(runtime_dir)
+            with _download_lock:
+                _download_state.update({"running": False, "error": None})
+        except Exception as exc:
+            logger.exception("App Ollama download failed")
+            with _download_lock:
+                _download_state.update({"running": False, "error": str(exc)[:500]})
+
+    threading.Thread(target=_run, daemon=True, name="ollama-download").start()
+    return {"ok": True, "status": "started"}
+
 
 def _platform_asset() -> tuple[str, str] | None:
-    """Return (filename, archive_kind) for the current platform."""
     system = platform.system().lower()
     arch = platform.machine().lower()
 
@@ -41,11 +88,62 @@ def _platform_asset() -> tuple[str, str] | None:
     return None
 
 
-def _ollama_binary_path(runtime_dir: Path) -> Path:
-    """Path to the ollama binary in our app data."""
+def app_ollama_dir(runtime_dir: Path) -> Path:
+    return runtime_dir / "ollama"
+
+
+def app_binary_path(runtime_dir: Path) -> Path:
     system = platform.system().lower()
     name = "ollama.exe" if system == "windows" else "ollama"
-    return runtime_dir / "ollama" / name
+    return app_ollama_dir(runtime_dir) / name
+
+
+def llama_server_path(runtime_dir: Path) -> Path:
+    system = platform.system().lower()
+    name = "llama-server.exe" if system == "windows" else "llama-server"
+    return app_ollama_dir(runtime_dir) / name
+
+
+def is_app_binary(path: Path | None, runtime_dir: Path) -> bool:
+    if not path:
+        return False
+    try:
+        return path.resolve() == app_binary_path(runtime_dir).resolve()
+    except OSError:
+        return False
+
+
+def find_app_binary(runtime_dir: Path) -> Path | None:
+    """Return only the app-downloaded Ollama binary (never PATH)."""
+    binary = app_binary_path(runtime_dir)
+    return binary if binary.exists() else None
+
+
+def find_user_binary() -> Path | None:
+    """Return a system-installed Ollama binary from PATH, if any."""
+    found = shutil.which("ollama")
+    return Path(found) if found else None
+
+
+def is_app_ollama_installed(runtime_dir: Path) -> bool:
+    """True when the app bundle includes ollama + llama-server (required for vision)."""
+    return find_app_binary(runtime_dir) is not None and llama_server_path(runtime_dir).exists()
+
+
+def is_app_ollama_partial(runtime_dir: Path) -> bool:
+    """Binary present but llama-server missing — broken multimodal install."""
+    return find_app_binary(runtime_dir) is not None and not llama_server_path(runtime_dir).exists()
+
+
+def is_any_ollama_installed(runtime_dir: Path) -> bool:
+    return is_app_ollama_installed(runtime_dir) or find_user_binary() is not None
+
+
+def remove_app_ollama(runtime_dir: Path) -> None:
+    """Delete app-managed Ollama binary. Does not touch user/system installs."""
+    target = app_ollama_dir(runtime_dir)
+    if target.exists():
+        shutil.rmtree(target, ignore_errors=True)
 
 
 def _is_port_open(port: int, host: str = "127.0.0.1") -> bool:
@@ -59,7 +157,6 @@ def _is_port_open(port: int, host: str = "127.0.0.1") -> bool:
 
 
 def _check_ollama_api(base_url: str) -> bool:
-    """Check if Ollama API responds at the given URL."""
     try:
         req = Request(f"{base_url}/api/version", method="GET")
         with urlopen(req, timeout=2) as resp:
@@ -68,67 +165,156 @@ def _check_ollama_api(base_url: str) -> bool:
         return False
 
 
-def detect_existing_ollama() -> str | None:
-    """Detect if Ollama is already running (user's own instance).
+def _base_for_port(port: int) -> str:
+    return f"http://127.0.0.1:{port}"
 
-    Returns the base URL if found, None otherwise.
-    """
-    # Check default port
-    if _is_port_open(DEFAULT_PORT):
-        base = f"http://127.0.0.1:{DEFAULT_PORT}"
-        if _check_ollama_api(base):
-            return base
 
-    # Check OLLAMA_HOST env var
+def detect_user_ollama() -> str | None:
+    """User/system Ollama — explicit OLLAMA_HOST override takes priority."""
     host = os.environ.get("OLLAMA_HOST", "").strip()
     if host:
         if not host.startswith("http"):
             host = f"http://{host}"
         if _check_ollama_api(host):
             return host
-
+    base = _base_for_port(OLLAMA_USER_PORT)
+    if _is_port_open(OLLAMA_USER_PORT) and _check_ollama_api(base):
+        return base
     return None
 
 
-def find_ollama_binary(runtime_dir: Path) -> Path | None:
-    """Find ollama binary: app data first, then PATH."""
-    # Our downloaded copy
-    local = _ollama_binary_path(runtime_dir)
-    if local.exists():
-        return local
+def _get_process_cmdline(pid: int) -> str | None:
+    """Return the full command line of a process, or None on failure."""
+    try:
+        if platform.system() == "Windows":
+            result = subprocess.run(
+                ["wmic", "process", "where", f"ProcessId={pid}", "get", "CommandLine", "/value"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.splitlines():
+                if line.startswith("CommandLine="):
+                    return line.split("=", 1)[1].strip()
+            return None
+        if platform.system() == "Linux":
+            return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode(errors="replace").strip()
+        # macOS / BSD
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip() or None
+    except Exception:
+        return None
 
-    # System PATH
-    system_path = shutil.which("ollama")
-    if system_path:
-        return Path(system_path)
 
+def detect_app_ollama() -> str | None:
+    """App-managed Ollama on the dedicated app port."""
+    base = OLLAMA_APP_BASE_URL
+    if not (_is_port_open(OLLAMA_APP_PORT) and _check_ollama_api(base)):
+        return None
+    # Verify the process on the app port is actually our binary
+    from . import port_utils
+    from engine.paths import app_data_root
+    pid = port_utils.find_process_on_port(OLLAMA_APP_PORT)
+    if pid is not None:
+        cmdline = _get_process_cmdline(pid)
+        if cmdline is not None:
+            expected_binary = find_app_binary(app_data_root() / "runtime")
+            if expected_binary is not None:
+                expected = str(expected_binary)
+                if expected not in cmdline:
+                    logger.info(
+                        "Port %d is occupied by a different Ollama (PID %d), not treating as app Ollama",
+                        OLLAMA_APP_PORT, pid,
+                    )
+                    return None
+    return base
+
+
+def detect_existing_ollama(*, prefer_user: bool = True) -> str | None:
+    """Return a running Ollama base URL.
+
+    When ``prefer_user`` is true, user/system (11434) wins over app (11435).
+    """
+    user = detect_user_ollama()
+    app = detect_app_ollama()
+    if prefer_user:
+        return user or app
+    return app or user
+
+
+def detect_ollama_source(runtime_dir: Path, *, prefer_user: bool = True) -> str | None:
+    """Identify which Ollama instance is active: ``app`` | ``user`` | ``None``."""
+    user = detect_user_ollama()
+    app = detect_app_ollama()
+    if prefer_user and user:
+        return "user"
+    if app:
+        return "app"
+    if user:
+        return "user"
     return None
 
 
-def is_ollama_installed(runtime_dir: Path) -> bool:
-    return find_ollama_binary(runtime_dir) is not None
+def resolve_active_ollama(
+    runtime_dir: Path,
+    *,
+    prefer_user: bool = True,
+) -> tuple[str | None, str | None]:
+    """Return ``(base_url, source)`` for the active instance."""
+    source = detect_ollama_source(runtime_dir, prefer_user=prefer_user)
+    if source == "user":
+        return detect_user_ollama(), "user"
+    if source == "app":
+        return detect_app_ollama(), "app"
+    return None, None
+
+
+def _download_with_progress(url: str, dest: Path, on_progress: ProgressFn | None = None) -> None:
+    chunk_size = 256 * 1024
+    req = Request(url)
+    with urlopen(req, timeout=30) as resp:
+        total = int(resp.headers.get("Content-Length", 0))
+        downloaded = 0
+        with open(dest, "wb") as f:
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if on_progress and total > 0:
+                    pct = int(5 + (downloaded / total) * 40)
+                    on_progress("download", pct, f"{downloaded // (1024 * 1024)}/{total // (1024 * 1024)} MB")
 
 
 def download_ollama(
     runtime_dir: Path,
     on_progress: ProgressFn | None = None,
 ) -> Path:
-    """Download Ollama binary to app data."""
+    """Download Ollama binary into app storage."""
     asset = _platform_asset()
     if not asset:
         raise RuntimeError(f"Unsupported platform: {platform.system()} {platform.machine()}")
 
     filename, kind = asset
     url = f"{OLLAMA_RELEASE_BASE}/{filename}"
-
-    dest_dir = runtime_dir / "ollama"
+    dest_dir = app_ollama_dir(runtime_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    binary = _ollama_binary_path(runtime_dir)
+    binary = app_binary_path(runtime_dir)
     marker = dest_dir / ".version"
 
-    # Skip if already downloaded
-    if binary.exists() and marker.exists() and marker.read_text().strip() == OLLAMA_VERSION:
+    server = llama_server_path(runtime_dir)
+    if (
+        binary.exists()
+        and server.exists()
+        and marker.exists()
+        and marker.read_text().strip() == OLLAMA_VERSION
+    ):
         return binary
+
+    if is_app_ollama_partial(runtime_dir):
+        logger.warning("App Ollama install incomplete (missing llama-server); re-extracting")
 
     if on_progress:
         on_progress("download", 5, f"Ollama {OLLAMA_VERSION}")
@@ -136,77 +322,132 @@ def download_ollama(
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         archive = tmp_path / filename
-        logger.info("Downloading Ollama: %s", url)
-        urlretrieve(url, archive)
+        logger.info("Downloading app Ollama: %s", url)
+        try:
+            _download_with_progress(url, archive, on_progress)
+        except Exception as exc:
+            raise RuntimeError(f"Download failed: {exc}. Check your network.") from exc
 
         if on_progress:
             on_progress("download", 50, "extracting")
 
-        if kind == "tgz":
-            with tarfile.open(archive, "r:gz") as tf:
-                try:
-                    tf.extractall(tmp_path, filter="data")
-                except TypeError:
-                    tf.extractall(tmp_path)
-        elif kind == "zip":
-            with zipfile.ZipFile(archive) as zf:
-                zf.extractall(tmp_path)
-        else:
-            raise RuntimeError(f"Unsupported archive format: {kind}")
+        try:
+            if kind == "tgz":
+                with tarfile.open(archive, "r:gz") as tf:
+                    try:
+                        tf.extractall(dest_dir, filter="data")
+                    except TypeError:
+                        tf.extractall(dest_dir)
+            elif kind == "zip":
+                with zipfile.ZipFile(archive) as zf:
+                    zf.extractall(dest_dir)
+            elif kind == "zst":
+                _extract_zst(archive, dest_dir)
+            else:
+                raise RuntimeError(f"Unsupported archive format: {kind}")
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"Extraction failed: {exc}") from exc
 
-        # Find the ollama binary in extracted files
-        found = False
-        for p in tmp_path.rglob("ollama*"):
-            if p.is_file() and (p.name == "ollama" or p.name == "ollama.exe"):
-                shutil.copy2(p, binary)
-                if platform.system().lower() != "windows":
-                    binary.chmod(binary.stat().st_mode | 0o755)
-                found = True
-                break
+        if not binary.exists():
+            raise RuntimeError("ollama binary not found after extraction")
+        if not server.exists():
+            raise RuntimeError(
+                "llama-server not found after extraction — vision models will not work"
+            )
 
-        if not found:
-            raise RuntimeError("ollama binary not found in downloaded archive")
+        if platform.system().lower() != "windows":
+            for name in ("ollama", "llama-server", "llama-quantize"):
+                p = dest_dir / name
+                if p.exists():
+                    p.chmod(p.stat().st_mode | 0o755)
+
+        _post_install_macos(dest_dir)
 
     marker.write_text(OLLAMA_VERSION, encoding="utf-8")
-
     if on_progress:
         on_progress("download", 100, "ready")
-
     return binary
 
 
+def _post_install_macos(dest_dir: Path) -> None:
+    """Clear quarantine and ad-hoc sign so Gatekeeper allows serve + llama-server."""
+    if platform.system().lower() != "darwin":
+        return
+    try:
+        subprocess.run(
+            ["xattr", "-cr", str(dest_dir)],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+        for name in ("ollama", "llama-server", "llama-quantize"):
+            p = dest_dir / name
+            if p.exists():
+                subprocess.run(
+                    ["codesign", "--force", "--sign", "-", str(p)],
+                    check=False,
+                    capture_output=True,
+                    timeout=30,
+                )
+    except Exception as exc:
+        logger.warning("macOS post-install signing skipped: %s", exc)
+
+
+def _extract_zst(archive: Path, dest: Path) -> None:
+    try:
+        import zstandard
+    except ImportError:
+        raise RuntimeError(
+            "zstandard package required for Linux Ollama download. "
+            "Install with: pip install zstandard"
+        ) from None
+
+    dctx = zstandard.ZstdDecompressor()
+    with open(archive, "rb") as fh:
+        with dctx.stream_reader(fh) as reader:
+            with tarfile.open(fileobj=reader, mode="r|") as tf:
+                try:
+                    tf.extractall(dest, filter="data")
+                except TypeError:
+                    tf.extractall(dest)
+
+
 class OllamaDaemon:
-    """Manage an Ollama daemon process."""
+    """Manage the app-owned Ollama daemon (port 11435)."""
 
     def __init__(self) -> None:
         self.process: subprocess.Popen | None = None
         self.base_url: str | None = None
-        self._is_ours = False  # Did we start it?
+        self._is_ours = False
 
     def start(
         self,
         runtime_dir: Path,
         models_dir: Path,
-        port: int = DEFAULT_PORT,
+        port: int = OLLAMA_APP_PORT,
     ) -> str:
-        """Start Ollama daemon. Returns base URL.
-
-        If Ollama is already running on the port, reuses it.
-        """
-        # Check if already running
-        existing = detect_existing_ollama()
+        """Start app Ollama. Reuses an existing app instance when already up."""
+        existing = detect_app_ollama()
         if existing:
             self.base_url = existing
             self._is_ours = False
-            logger.info("Reusing existing Ollama at %s", existing)
+            logger.info("Reusing app Ollama at %s", existing)
             return existing
 
-        binary = find_ollama_binary(runtime_dir)
-        if not binary:
-            raise RuntimeError("Ollama not installed. Download it first.")
+        if is_app_ollama_partial(runtime_dir):
+            logger.info("Repairing incomplete app Ollama (missing llama-server)...")
+            download_ollama(runtime_dir)
+
+        binary = find_app_binary(runtime_dir)
+        if not binary or not llama_server_path(runtime_dir).exists():
+            raise RuntimeError(
+                "App Ollama not installed or incomplete. "
+                "Re-download from Settings → Ollama."
+            )
 
         models_dir.mkdir(parents=True, exist_ok=True)
-
         env = {
             **os.environ,
             "OLLAMA_HOST": f"127.0.0.1:{port}",
@@ -214,33 +455,37 @@ class OllamaDaemon:
             "OLLAMA_KEEP_ALIVE": "5m",
         }
 
-        logger.info("Starting Ollama: %s serve (port %d)", binary, port)
+        logger.info("Starting app Ollama: %s serve (port %d)", binary, port)
         self.process = subprocess.Popen(
             [str(binary), "serve"],
             env=env,
+            cwd=str(binary.parent),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
         self._is_ours = True
 
-        # Wait for API to become available
-        base = f"http://127.0.0.1:{port}"
         import time
 
+        base = _base_for_port(port)
         deadline = time.time() + 30
         while time.time() < deadline:
             if self.process.poll() is not None:
-                raise RuntimeError("Ollama exited unexpectedly during startup")
+                err = ""
+                if self.process.stderr:
+                    err = self.process.stderr.read().decode(errors="replace")[:500]
+                raise RuntimeError(
+                    f"App Ollama exited unexpectedly during startup{f': {err}' if err else ''}"
+                )
             if _check_ollama_api(base):
                 self.base_url = base
-                logger.info("Ollama ready at %s", base)
+                logger.info("App Ollama ready at %s", base)
                 return base
             time.sleep(0.5)
 
-        raise RuntimeError("Ollama startup timeout (30s)")
+        raise RuntimeError("App Ollama startup timeout (30s)")
 
     def stop(self) -> None:
-        """Stop Ollama only if we started it."""
         if self.process and self._is_ours:
             self.process.terminate()
             try:
@@ -250,3 +495,26 @@ class OllamaDaemon:
             self.process = None
         self.base_url = None
         self._is_ours = False
+
+
+def get_shared_daemon() -> OllamaDaemon:
+    global _daemon
+    if _daemon is None:
+        _daemon = OllamaDaemon()
+    return _daemon
+
+
+def stop_shared_daemon() -> None:
+    global _daemon
+    if _daemon is not None:
+        _daemon.stop()
+        _daemon = None
+
+
+# Back-compat helpers used by older call sites
+def find_ollama_binary(runtime_dir: Path) -> Path | None:
+    return find_app_binary(runtime_dir) or find_user_binary()
+
+
+def is_ollama_installed(runtime_dir: Path) -> bool:
+    return is_any_ollama_installed(runtime_dir)

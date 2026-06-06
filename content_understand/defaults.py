@@ -11,7 +11,14 @@ from __future__ import annotations
 SIDECAR_PORT = 17890
 
 # ── Ollama ──
-OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+# User/system Ollama (if installed separately) listens here by default.
+OLLAMA_USER_PORT = 11434
+OLLAMA_USER_BASE_URL = f"http://127.0.0.1:{OLLAMA_USER_PORT}"
+# App-managed Ollama uses a dedicated port to avoid clashing with the user's daemon.
+OLLAMA_APP_PORT = 11435
+OLLAMA_APP_BASE_URL = f"http://127.0.0.1:{OLLAMA_APP_PORT}"
+# Back-compat alias for OpenAI-compat base construction.
+OLLAMA_BASE_URL = OLLAMA_USER_BASE_URL
 
 # ── Model defaults per backend ─────────────────────────────────────────────
 # Each tuple is (video_model, image_model, audio_model, article_model).
@@ -29,8 +36,7 @@ CLAUDE_API_BASE = "https://api.anthropic.com"
 
 OPENAI_COMPAT_DEFAULT_MODEL = "gpt-4o-mini"
 
-LOCAL_SERVER_DEFAULT_MODEL = "gemma"
-LOCAL_SERVER_DEFAULT_PRESET = "gemma4-12b-multimodal"
+LOCAL_SERVER_DEFAULT_MODEL = ""
 
 # ── Whisper ──
 WHISPER_DEFAULT_MODEL = "large-v3"

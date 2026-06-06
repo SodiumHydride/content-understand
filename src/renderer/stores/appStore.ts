@@ -13,6 +13,12 @@ import type {
   UnderstandTask,
   ViewMode
 } from './types'
+import type { ThinkingCanvasDocument, ThinkingToolPreferences } from '../lib/thinkingCanvas/types'
+import { createEmptyDocument } from '../lib/thinkingCanvas/document'
+import { DEFAULT_TOOL_PREFERENCES } from '../lib/thinkingCanvas/defaults'
+import { applyToolPreferences } from '../lib/thinkingCanvas/document'
+import { buildMigrationFromPersistedState, parseCanvasDocument } from '../lib/thinkingCanvas/migration'
+import { fetchThinkingCanvas, saveThinkingCanvas } from '../lib/thinkingCanvas/api'
 import { DEFAULT_MODALITY_ROUTE, PROVIDER_PRESETS } from './types'
 import { getEffectiveLocale } from '../lib/i18n'
 import i18n from '../lib/i18n'
@@ -58,6 +64,18 @@ const defaultSettings: AppSettings = {
   localPresetId: '',
   useOllamaIfAvailable: true,
   autoStartLocal: true,
+  frameSettings: {
+    fps: 1.0,
+    maxFrames: 30,
+    scale: '',
+    strategy: 'uniform'
+  },
+  audioExtractSettings: {
+    enabled: true,
+    sampleRate: 16000
+  },
+  outputLanguage: 'zh',
+  promptTemplate: '',
   cookiesPath: ''
 }
 
@@ -143,6 +161,10 @@ function migrateSettings(old: any): AppSettings {
     localPresetId: old.localPresetId || '',
     useOllamaIfAvailable: old.useOllamaIfAvailable ?? true,
     autoStartLocal: old.autoStartLocal ?? true,
+    frameSettings: old.frameSettings || { fps: 1.0, maxFrames: 30, scale: '', strategy: 'uniform' },
+    audioExtractSettings: old.audioExtractSettings || { enabled: true, sampleRate: 16000 },
+    outputLanguage: old.outputLanguage || 'zh',
+    promptTemplate: old.promptTemplate || '',
     cookiesPath: old.cookiesPath || ''
   }
 }
@@ -265,6 +287,9 @@ interface AppState {
   thinkingMap: Record<string, MapNodePos>
   wikiMap: Record<string, MapNodePos>
   thinkingScratch: ScratchNode[]
+  thinkingCanvas: ThinkingCanvasDocument | null
+  thinkingCanvasReady: boolean
+  thinkingToolPrefs: ThinkingToolPreferences
 
   setSettingsOpen: (open: boolean) => void
   setViewMode: (mode: ViewMode) => void
@@ -294,8 +319,19 @@ interface AppState {
   updateNote: (slug: string, patch: Partial<Pick<LibraryItem, 'title' | 'body' | 'summary'>>) => void
   setVaultNodePos: (slug: string, pos: MapNodePos) => void
   setMapNodePos: (map: MapMode, id: string, pos: MapNodePos) => void
-  addScratchNode: (text: string, pos?: MapNodePos) => void
+  addScratchNode: (text: string, pos?: MapNodePos) => string
   updateScratchNode: (id: string, patch: Partial<ScratchNode>) => void
+  removeScratchNode: (id: string) => void
+  setThinkingCanvas: (doc: ThinkingCanvasDocument) => void
+  patchThinkingCanvas: (
+    updater: (doc: ThinkingCanvasDocument) => ThinkingCanvasDocument
+  ) => void
+  setThinkingToolPrefs: (
+    patch:
+      | Partial<ThinkingToolPreferences>
+      | ((prev: ThinkingToolPreferences) => ThinkingToolPreferences)
+  ) => void
+  loadThinkingCanvas: () => Promise<void>
   addTask: (task: UnderstandTask) => void
   updateTask: (id: string, patch: Partial<UnderstandTask>) => void
   refreshLibrary: () => Promise<void>
@@ -323,6 +359,9 @@ export const useAppStore = create<AppState>()(
       thinkingMap: {},
       wikiMap: {},
       thinkingScratch: [],
+      thinkingCanvas: null,
+      thinkingCanvasReady: false,
+      thinkingToolPrefs: { ...DEFAULT_TOOL_PREFERENCES },
 
       setSettingsOpen: (open) => set({ settingsOpen: open }),
       setViewMode: (viewMode) => set({ viewMode }),
@@ -480,11 +519,74 @@ export const useAppStore = create<AppState>()(
         set((s) => ({
           thinkingScratch: [...s.thinkingScratch, { id, text, x, y }]
         }))
+        return id
       },
       updateScratchNode: (id, patch) =>
         set((s) => ({
           thinkingScratch: s.thinkingScratch.map((n) => (n.id === id ? { ...n, ...patch } : n))
         })),
+      removeScratchNode: (id) =>
+        set((s) => ({
+          thinkingScratch: s.thinkingScratch.filter((n) => n.id !== id)
+        })),
+      setThinkingCanvas: (doc) => set({ thinkingCanvas: doc }),
+      patchThinkingCanvas: (updater) =>
+        set((s) => {
+          const base = s.thinkingCanvas ?? createEmptyDocument()
+          return { thinkingCanvas: updater(base) }
+        }),
+      setThinkingToolPrefs: (patch) =>
+        set((s) => ({
+          thinkingToolPrefs:
+            typeof patch === 'function'
+              ? patch(s.thinkingToolPrefs)
+              : applyToolPreferences(s.thinkingToolPrefs, patch)
+        })),
+      loadThinkingCanvas: async () => {
+        let legacyTexts: { id: string; text: string; x: number; y: number }[] | undefined
+        let legacyStrokes:
+          | { id: string; points: { x: number; y: number }[]; color: string; width: number }[]
+          | undefined
+        let legacyScratch = get().thinkingScratch
+
+        try {
+          const raw = localStorage.getItem('content-understand-settings')
+          if (raw) {
+            const parsed = JSON.parse(raw) as { state?: Record<string, unknown> }
+            const st = parsed.state
+            if (st) {
+              legacyTexts = st.thinkingTexts as typeof legacyTexts
+              legacyStrokes = st.thinkingStrokes as typeof legacyStrokes
+              if (Array.isArray(st.thinkingScratch)) {
+                legacyScratch = st.thinkingScratch as ScratchNode[]
+              }
+            }
+          }
+        } catch {
+          /* ignore corrupt local storage */
+        }
+
+        let doc = await fetchThinkingCanvas()
+        doc = doc ? parseCanvasDocument(doc) : null
+
+        const legacyHasData =
+          (legacyTexts?.length ?? 0) > 0 ||
+          (legacyStrokes?.length ?? 0) > 0 ||
+          legacyScratch.length > 0
+
+        if ((!doc || doc.elements.length === 0) && legacyHasData) {
+          doc = buildMigrationFromPersistedState({
+            thinkingTexts: legacyTexts,
+            thinkingStrokes: legacyStrokes,
+            thinkingScratch: legacyScratch
+          })
+          const saved = await saveThinkingCanvas(doc)
+          if (saved) doc = parseCanvasDocument(saved)
+        }
+
+        if (!doc) doc = createEmptyDocument()
+        set({ thinkingCanvas: doc, thinkingCanvasReady: true })
+      },
       addTask: (task) => set((s) => ({ tasks: [task, ...s.tasks] })),
       updateTask: (id, patch) =>
         set((s) => ({
@@ -507,6 +609,7 @@ export const useAppStore = create<AppState>()(
 
       startUnderstand: async (url: string) => {
         const { startIngest, pollJob } = await import('../lib/sidecar')
+        await get().pushEngineConfig()
         const id = crypto.randomUUID()
         const task: UnderstandTask = {
           id,
@@ -521,24 +624,11 @@ export const useAppStore = create<AppState>()(
         try {
           const jobId = await startIngest(url)
           if (!jobId) {
-            const stages = ['resolve', 'download', 'model', 'write'] as const
-            for (let i = 0; i < stages.length; i++) {
-              await new Promise((r) => setTimeout(r, 800))
-              get().updateTask(id, {
-                progress: {
-                  stage: stages[i],
-                  percent: (i + 1) * 25,
-                  message: ''
-                }
-              })
-            }
             get().updateTask(id, {
-              status: 'completed',
-              title: 'Demo · 理解完成',
-              contentType: 'video',
-              slug: 'video/demo-welcome'
+              status: 'failed',
+              error:
+                'Engine offline — restart the app or check that the sidecar is running.'
             })
-            set({ viewMode: 'journal', selectedSlug: 'video/demo-welcome' })
             return
           }
 
@@ -572,14 +662,16 @@ export const useAppStore = create<AppState>()(
           mapMode: s.mapMode,
           thinkingMap: s.thinkingMap,
           wikiMap: s.wikiMap,
-          thinkingScratch: s.thinkingScratch
+          thinkingToolPrefs: s.thinkingToolPrefs
         }
       },
       merge: (persisted: unknown, current) => {
         const merged = { ...current, ...(persisted as Record<string, unknown>) } as AppState
-        // Migrate old settings format
         if (merged.settings && !merged.settings.providers) {
           merged.settings = migrateSettings(merged.settings)
+        }
+        if (!merged.thinkingToolPrefs) {
+          merged.thinkingToolPrefs = { ...DEFAULT_TOOL_PREFERENCES }
         }
         return merged
       }

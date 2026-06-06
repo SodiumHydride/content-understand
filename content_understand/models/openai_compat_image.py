@@ -41,6 +41,7 @@ class OpenAICompatImageModel(ImageModel):
         image_url: str | None = None,
         prompt: str = "",
         timeout: int = 60,
+        language: str = "zh",
     ) -> str:
         if not image_path and not image_url:
             raise ValueError("Either image_path or image_url is required")
@@ -63,7 +64,11 @@ class OpenAICompatImageModel(ImageModel):
             })
 
         if not prompt:
-            prompt = "请详细分析这张图片，按以下结构输出：\n\n## 摘要\n描述图片的主要内容\n\n## 要点\n- 列出图片中的关键元素\n\n## 标签\n给出 5-10 个相关标签\n\n## 总结\n用 1-2 句话总结图片主旨"
+            _defaults = {
+                "zh": "请详细分析这张图片，按以下结构输出：\n\n## 摘要\n描述图片的主要内容\n\n## 要点\n- 列出图片中的关键元素\n\n## 标签\n给出 5-10 个相关标签\n\n## 总结\n用 1-2 句话总结图片主旨",
+                "en": "Analyze this image in detail, output in the following structure:\n\n## Summary\nDescribe the main content of the image\n\n## Key Points\n- List key elements in the image\n\n## Tags\nGive 5-10 relevant tags\n\n## Conclusion\nSummarize the image's message in 1-2 sentences",
+            }
+            prompt = _defaults.get(language, _defaults["zh"])
 
         content.append({"type": "text", "text": prompt})
 

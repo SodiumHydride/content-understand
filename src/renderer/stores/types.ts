@@ -16,6 +16,24 @@ export interface ScratchNode {
   y: number
 }
 
+/** Freeform text placed directly on the thinking canvas (no sticky chrome). */
+export interface ThinkingTextNode {
+  id: string
+  text: string
+  x: number
+  y: number
+}
+
+/** Pen stroke in world coordinates. */
+export interface ThinkingStroke {
+  id: string
+  points: MapNodePos[]
+  color: string
+  width: number
+}
+
+export type ThinkingTool = 'select' | 'text' | 'pen'
+
 export type TaskStage = 'resolve' | 'download' | 'model' | 'write'
 
 export type TaskStatus = 'processing' | 'completed' | 'failed'
@@ -100,8 +118,30 @@ export interface AppSettings {
   useOllamaIfAvailable: boolean
   autoStartLocal: boolean
 
+  // ── Video processing ──
+  frameSettings: FrameSettings
+  audioExtractSettings: AudioExtractSettings
+
+  // ── Output ──
+  outputLanguage: 'zh' | 'en'
+  promptTemplate: string
+
   // ── Misc ──
   cookiesPath: string
+}
+
+/** Video frame extraction settings. */
+export interface FrameSettings {
+  fps: number           // 0.1 ~ 5.0, default 1.0
+  maxFrames: number     // 10 ~ 100, default 30
+  scale: string         // "" (original) | "512:-2" | "720:-2"
+  strategy: 'uniform' | 'keyframe'  // default 'uniform'
+}
+
+/** Audio extraction from video settings. */
+export interface AudioExtractSettings {
+  enabled: boolean      // default true
+  sampleRate: number    // default 16000
 }
 
 // ── Provider presets (for model lists when /v1/models is unavailable) ──

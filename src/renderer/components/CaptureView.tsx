@@ -35,6 +35,8 @@ export function CaptureView(): React.JSX.Element {
   const [activeChip, setActiveChip] = useState<'bilibili' | 'youtube' | 'article' | null>(null)
   const hint = detectPlatformHint(inputUrl)
   const activeTasks = tasks.filter((task) => task.status === 'processing')
+  const failedTasks = tasks.filter((task) => task.status === 'failed').slice(0, 3)
+  const pipelineTasks = [...activeTasks, ...failedTasks]
   const recentNotes = library.slice(0, 2)
   const locale = i18n.language.startsWith('zh') ? 'zh-cn' : 'en'
 
@@ -153,11 +155,11 @@ export function CaptureView(): React.JSX.Element {
           </div>
         </div>
 
-        {activeTasks.length > 0 && (
+        {pipelineTasks.length > 0 && (
           <div className="capture-pipeline-inline">
             <span className="section-label">{t('capture.pipelineTitle')}</span>
             <div className="mt-2 flex flex-col gap-2">
-              {activeTasks.map((task) => (
+              {pipelineTasks.map((task) => (
                 <PipelineStepper key={task.id} task={task} />
               ))}
             </div>

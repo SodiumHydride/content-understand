@@ -1,10 +1,15 @@
 """Backend registry — lazy-loads model modules on demand.
 
-Supports four model categories:
-- Video: VideoModel backends
-- Image: ImageModel backends
-- Audio: AudioModel backends
-- Article: ArticleModel backends
+Two registry systems coexist:
+
+1. **Unified ContentModel registry** (new): `_CONTENT_MODELS` maps backend names
+   to ContentModel implementations. Used by the new pipeline routing.
+
+2. **Per-modality registries** (legacy): `_VIDEO_BACKENDS`, `_IMAGE_BACKENDS`,
+   `_AUDIO_BACKENDS`, `_ARTICLE_BACKENDS`. Kept for backward compatibility.
+
+New backends (Gemma 4, Qwen2.5-Omni) go in `_CONTENT_MODELS`.
+Old backends are wrapped via adapters in `_CONTENT_MODELS`.
 """
 
 from __future__ import annotations
@@ -16,10 +21,21 @@ if TYPE_CHECKING:
     from content_understand.config import BackendConfig
     from content_understand.models.article_base import ArticleModel
     from content_understand.models.audio_base import AudioModel
-    from content_understand.models.base import VideoModel
+    from content_understand.models.base import ContentModel, VideoModel
     from content_understand.models.image_base import ImageModel
 
-# ── Video backends ──────────────────────────────────────────────────
+# ── Unified ContentModel registry (new) ────────────────────────────
+# Maps backend name → (module_path, class_name)
+# These models implement ContentModel with capabilities() support.
+_CONTENT_MODELS: dict[str, tuple[str, str]] = {
+    "gemma4": ("content_understand.models.gemma4", "Gemma4Model"),
+    "qwen_omni": ("content_understand.models.qwen_omni", "QwenOmniModel"),
+    "mimo": ("content_understand.models.mimo_adapter", "MimoAdapter"),
+    "openai_compat": ("content_understand.models.openai_compat_adapter", "OpenAICompatAdapter"),
+    "local_server": ("content_understand.models.openai_compat_adapter", "OpenAICompatAdapter"),
+}
+
+# ── Video backends (legacy) ────────────────────────────────────────
 _VIDEO_BACKENDS: dict[str, tuple[str, str]] = {
     "mimo": ("content_understand.models.mimo", "MimoModel"),
     "openai_compat": ("content_understand.models.openai_compat", "OpenAICompatModel"),
@@ -38,7 +54,14 @@ _IMAGE_BACKENDS: dict[str, tuple[str, str]] = {
 _AUDIO_BACKENDS: dict[str, tuple[str, str]] = {
     "mimo": ("content_understand.models.mimo_audio", "MimoAudioModel"),
     "gemini": ("content_understand.models.gemini_audio", "GeminiAudioModel"),
-    "local_server": ("content_understand.models.mimo_audio", "MimoAudioModel"),
+    "openai_compat": (
+        "content_understand.models.openai_compat_audio",
+        "OpenAICompatAudioModel",
+    ),
+    "local_server": (
+        "content_understand.models.openai_compat_audio",
+        "OpenAICompatAudioModel",
+    ),
 }
 
 # ── Article backends ────────────────────────────────────────────────
@@ -115,6 +138,39 @@ def create_article_model(backend_name: str, config: BackendConfig) -> ArticleMod
             f"Article backend '{backend_name}' not available: {e}"
         ) from None
     return cls(config)
+
+
+def create_content_model(backend_name: str, config: BackendConfig) -> ContentModel:
+    """Create a unified ContentModel by backend name.
+
+    This is the preferred way to create models in the new pipeline.
+    Falls back to legacy per-modality models wrapped in adapters.
+    """
+    if backend_name in _CONTENT_MODELS:
+        module_path, class_name = _CONTENT_MODELS[backend_name]
+        try:
+            cls = _load_class(module_path, class_name)
+            return cls(config)
+        except (ImportError, ModuleNotFoundError) as e:
+            raise NotImplementedError(
+                f"Content model backend '{backend_name}' not available: {e}"
+            ) from None
+
+    # Fallback: try to wrap legacy backends
+    known = ", ".join(sorted(_CONTENT_MODELS))
+    raise ValueError(
+        f"Unknown content model backend '{backend_name}'. Known: {known}"
+    )
+
+
+def has_content_model(backend_name: str) -> bool:
+    """Check if a backend has a ContentModel implementation."""
+    return backend_name in _CONTENT_MODELS
+
+
+def list_content_models() -> list[str]:
+    """List all available ContentModel backend names."""
+    return sorted(_CONTENT_MODELS.keys())
 
 
 def create_model(

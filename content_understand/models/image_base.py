@@ -17,6 +17,7 @@ class ImageModel(ABC):
         image_url: str | None = None,
         prompt: str = "",
         timeout: int = 60,
+        language: str = "zh",
     ) -> str:
         """Understand an image and return structured text.
 

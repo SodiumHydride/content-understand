@@ -27,16 +27,19 @@ export function PipelineStepper({ task }: { task: UnderstandTask }): React.JSX.E
         </div>
         <div className="pipeline-steps">
           {STAGES.map((stage, i) => {
-            const done = task.status === 'completed' || i < currentIdx
+            const failed = task.status === 'failed'
+            const done = task.status === 'completed' || (!failed && i < currentIdx)
             const active =
               task.status === 'processing' && i === currentIdx
+            const failedHere = failed && i === currentIdx
             return (
               <div
                 key={stage}
                 className={clsx(
                   'pipeline-step',
                   done && 'pipeline-step-done',
-                  active && 'pipeline-step-active'
+                  active && 'pipeline-step-active',
+                  failedHere && 'pipeline-step-failed'
                 )}
               >
                 <div className="pipeline-step-dot">{i + 1}</div>
@@ -54,8 +57,13 @@ export function PipelineStepper({ task }: { task: UnderstandTask }): React.JSX.E
           />
         </div>
       )}
-      {task.error && (
-        <p className="mt-2 text-xs text-[var(--color-danger)]">{task.error}</p>
+      {task.progress?.message && task.status === 'processing' && (
+        <p className="mt-2 text-xs text-[var(--color-ink-muted)]">{task.progress.message}</p>
+      )}
+      {task.status === 'failed' && (
+        <p className="mt-2 whitespace-pre-wrap text-xs text-[var(--color-danger)]">
+          {task.error || t('tasks.failed')}
+        </p>
       )}
     </div>
   )

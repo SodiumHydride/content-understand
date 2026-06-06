@@ -59,6 +59,8 @@ def ensure_app_dirs() -> dict[str, str]:
     for p in (root, vault, cache, models, exports):
         p.mkdir(parents=True, exist_ok=True)
 
+    (root / "thinking" / "assets").mkdir(parents=True, exist_ok=True)
+
     for sub in ("video", "image", "audio", "article", "notes"):
         (vault / sub).mkdir(exist_ok=True)
 

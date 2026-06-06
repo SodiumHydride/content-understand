@@ -13,6 +13,11 @@ from content_understand.models.image_base import ImageModel
 logger = logging.getLogger(__name__)
 
 
+def _mimo_headers(key: str) -> dict[str, str]:
+    """MiMo uses 'api-key' header instead of 'Authorization: Bearer'."""
+    return {"api-key": key, "Content-Type": "application/json"}
+
+
 class MimoImageModel(ImageModel):
     """MiMo image understanding via OpenAI-compatible API with multi-key rotation."""
 
@@ -25,7 +30,8 @@ class MimoImageModel(ImageModel):
 
     def _post(self, body: dict, timeout: int, label: str) -> str:
         return rotate_request(
-            self.api_base, body, self.rotator, timeout, f"mimo-image:{label}"
+            self.api_base, body, self.rotator, timeout, f"mimo-image:{label}",
+            headers_factory=_mimo_headers,
         )
 
     def understand_image(
@@ -34,6 +40,7 @@ class MimoImageModel(ImageModel):
         image_url: str | None = None,
         prompt: str = "",
         timeout: int = 60,
+        language: str = "zh",
     ) -> str:
         if not image_url and not image_path:
             raise ValueError("Either image_url or image_path is required")
@@ -55,7 +62,7 @@ class MimoImageModel(ImageModel):
                     ],
                 }
             ],
-            "max_tokens": self.max_tokens,
+            "max_completion_tokens": self.max_tokens,
         }
 
         return self._post(body, timeout or self.timeout, "image")

@@ -26,11 +26,24 @@ export default function App(): React.JSX.Element {
 
         // Auto-detect local runtime if enabled and not cloud-only
         if (settings.autoStartLocal && settings.inferenceMode !== 'api_only') {
-          void autoDetectRuntime()
+          void autoDetectRuntime({
+            useUserOllama: settings.useOllamaIfAvailable,
+            autoSetup: true
+          })
+        } else if (settings.inferenceMode !== 'api_only') {
+          void autoDetectRuntime({ useUserOllama: settings.useOllamaIfAvailable })
         }
       }
     })()
-  }, [refreshLibrary, setSidecarOnline, syncAppPaths, pushEngineConfig, settings.autoStartLocal, settings.inferenceMode])
+  }, [
+    refreshLibrary,
+    setSidecarOnline,
+    syncAppPaths,
+    pushEngineConfig,
+    settings.autoStartLocal,
+    settings.inferenceMode,
+    settings.useOllamaIfAvailable
+  ])
 
   return <Layout />
 }

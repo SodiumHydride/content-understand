@@ -10,7 +10,13 @@ from content_understand.models.article_base import ArticleModel
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_ARTICLE_PROMPT = """请详细分析以下文章内容，输出结构化摘要。
+
+def _mimo_headers(key: str) -> dict[str, str]:
+    """MiMo uses 'api-key' header instead of 'Authorization: Bearer'."""
+    return {"api-key": key, "Content-Type": "application/json"}
+
+_DEFAULT_ARTICLE_PROMPT: dict[str, str] = {
+    "zh": """请详细分析以下文章内容，输出结构化摘要。
 
 标题：{title}
 来源：{url}
@@ -40,7 +46,39 @@ _DEFAULT_ARTICLE_PROMPT = """请详细分析以下文章内容，输出结构化
 - 给出 5-10 个相关标签，格式：#标签1 #标签2 ...
 
 ## 总结
-- 用 2-3 句话总结文章主旨和核心价值"""
+- 用 2-3 句话总结文章主旨和核心价值""",
+    "en": """Analyze the following article and output a structured summary.
+
+Title: {title}
+Source: {url}
+
+Article content:
+```
+{text}
+```
+
+Output in the following structure:
+
+## Key Points
+- List core points (3-8 items)
+
+## Detailed Content
+- Expand by argument or theme
+- Core viewpoints and supporting evidence per section
+
+## Key Data & Quotes
+- Key data, statistics, quotes from the text (if any)
+
+## Author's Stance
+- Author's main viewpoint or position
+- Argumentation logic
+
+## Tags
+- Give 5-10 relevant tags, format: #tag1 #tag2 ...
+
+## Conclusion
+- Summarize the article's core message and value in 2-3 sentences""",
+}
 
 
 class MimoArticleModel(ArticleModel):
@@ -58,7 +96,8 @@ class MimoArticleModel(ArticleModel):
 
     def _post(self, body: dict, timeout: int, label: str) -> str:
         return rotate_request(
-            self.api_base, body, self.rotator, timeout, f"article-mimo:{label}"
+            self.api_base, body, self.rotator, timeout, f"article-mimo:{label}",
+            headers_factory=_mimo_headers,
         )
 
     def understand_article(
@@ -68,20 +107,20 @@ class MimoArticleModel(ArticleModel):
         url: str = "",
         prompt: str = "",
         timeout: int = 120,
+        language: str = "zh",
     ) -> str:
         max_chars = 60000
         if len(text) > max_chars:
             text = text[:max_chars] + "\n\n[... text truncated ...]"
 
         if not prompt:
-            prompt = _DEFAULT_ARTICLE_PROMPT.format(
-                title=title, url=url, text=text
-            )
+            template = _DEFAULT_ARTICLE_PROMPT.get(language, _DEFAULT_ARTICLE_PROMPT["zh"])
+            prompt = template.format(title=title, url=url, text=text)
 
         body = {
             "model": self.model_name,
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": self.max_tokens,
+            "max_completion_tokens": self.max_tokens,
         }
 
         return self._post(body, timeout or self.timeout, "article")

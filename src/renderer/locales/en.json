@@ -92,10 +92,26 @@
       "thinking": "Thinking",
       "wiki": "Wiki"
     },
-    "scratchDefault": "New idea…",
+    "textPlaceholder": "Start typing…",
+    "toolBar": "Canvas tools",
+    "toolSize": "Size",
+    "textSize": "Font size",
+    "tool": {
+      "select": "Select",
+      "text": "Text",
+      "pen": "Pen",
+      "highlighter": "Highlighter",
+      "eraser": "Eraser",
+      "image": "Image"
+    },
+    "eraser": {
+      "partial": "Partial",
+      "stroke": "Whole stroke"
+    },
     "canvasNav": "Wheel to pan · ⌘+wheel to zoom · middle-click or space+drag",
+    "canvasNavThinking": "V select · T text · P pen · H highlight · E eraser · I image · space+drag",
     "canvasTip": {
-      "thinking": "Double-click empty space · right-click or ⌘N",
+      "thinking": "Text: click to type · Pen/highlighter: drag · Image: paste or I · space+drag to pan",
       "wiki": "Click to select · double-click to read"
     },
     "peek": {
@@ -104,8 +120,11 @@
       "dismiss": "Clear selection"
     },
     "menu": {
-      "newScratch": "Add blank sticky",
-      "newScratchShortcut": "⌘N",
+      "addTextHere": "Type here",
+      "editText": "Edit text",
+      "deleteText": "Delete text",
+      "deleteElement": "Delete",
+      "replaceImage": "Replace image",
       "readNote": "Read note",
       "wikiCanvasLabel": "Wiki graph",
       "editLinks": "Edit links for this note",
@@ -114,7 +133,7 @@
     "empty": "Map is empty",
     "emptyHint": "Add notes in Capture, then arrange them here",
     "emptyDetail": {
-      "thinking": "Drag to arrange; double-click, right-click, or ⌘N for a sticky; pan in any direction",
+      "thinking": "Type and draw on an empty canvas; captured notes appear as reference nodes",
       "wiki": "Click to select; double-click or right-click to read. Links managed in-app (coming soon)"
     }
   },
@@ -178,19 +197,23 @@
     "languageSystem": "System",
     "languageZh": "中文",
     "languageEn": "English",
+    "outputLanguage": "AI Output Language",
+    "promptTemplate": "Custom Prompt (optional)",
+    "promptTemplatePlaceholder": "Leave empty to use default prompt, fill to override",
+    "promptTemplateHint": "Supports Markdown. Leave empty to auto-select default prompt based on output language.",
     "vaultPath": "Notes folder (in-app)",
     "vaultHint": "Wiki and notes live inside the app data folder—not a random drive path. Export .md anytime.",
     "vaultOpen": "Open notes folder",
     "vaultExportAll": "Export all Markdown",
-    "modelsHint": "Cloud: OpenAI-compatible base URL. Local: app downloads a curated Gemma 4 GGUF preset and starts llama-server (or uses Ollama if detected).",
+    "modelsHint": "Cloud: OpenAI-compatible base URL. Local: Ollama + curated presets; app can install its own Ollama into app data.",
     "inferenceMode": "Inference priority",
     "inferencePreferApi": "Prefer cloud API",
     "inferencePreferLocal": "Prefer local engine",
     "inferenceLocalOnly": "Local only",
     "inferenceApiOnly": "Cloud only (no model download)",
-    "localPreset": "Local model preset",
-    "prepareLocalEngine": "Prepare local engine (download preset)",
-    "useOllamaIfAvailable": "Use Ollama when installed (advanced)",
+    "localPreset": "Local preset",
+    "prepareLocalEngine": "Prepare local engine (Ollama + preset)",
+    "useOllamaIfAvailable": "Prefer system Ollama when running (catalog models still manageable)",
     "runtimeState": "Local engine",
     "downloadedModels": "Downloaded Models",
     "noModels": "No local models downloaded yet",
@@ -209,7 +232,7 @@
     "articleBackend": "Article",
     "backendMimo": "MiMo API",
     "backendOpenAI": "Cloud OpenAI-compatible",
-    "backendLocal": "Local (Ollama / llama.cpp)",
+    "backendLocal": "Local (Ollama presets)",
     "backendGemini": "Google Gemini",
     "backendClaude": "Anthropic Claude",
     "mimoKeys": "MiMo API Keys",
@@ -220,9 +243,6 @@
     "cookiesPath": "Bilibili cookies (optional)",
     "cacheDir": "Cache (in-app)",
     "modelsDir": "Models (in-app)",
-    "huggingFaceModelId": "Hugging Face model ID",
-    "huggingFacePlaceholder": "e.g. Qwen/Qwen2-VL-7B-Instruct",
-    "huggingFaceSoon": "One-click Hugging Face download — coming soon",
     "save": "Save",
     "saved": "Saved",
     "saveFailed": "Save failed — engine may be offline",

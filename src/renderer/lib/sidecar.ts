@@ -88,10 +88,15 @@ export async function pollJob(
       progress?: TaskProgress
       error?: string
       result_slug?: string
+      logs?: string[]
     }
     if (data.progress) onProgress(data.progress)
     if (data.status === 'completed') return data.result_slug ?? null
-    if (data.status === 'failed') throw new Error(data.error || 'failed')
+    if (data.status === 'failed') {
+      const tail = (data.logs ?? []).slice(-4).join('\n')
+      const msg = [data.error || 'failed', tail].filter(Boolean).join('\n')
+      throw new Error(msg)
+    }
 
     const jitter = delay * (0.8 + Math.random() * 0.4)
     await new Promise((res) => setTimeout(res, jitter))
@@ -107,6 +112,35 @@ export async function rebuildIndex(): Promise<void> {
     await fetch(`${base}/v1/index/rebuild`, { method: 'POST' })
   } catch {
     // ignore — index rebuild is best-effort
+  }
+}
+
+export interface LogEntry {
+  ts: number
+  level: string
+  logger: string
+  message: string
+}
+
+export async function fetchLogs(opts?: {
+  limit?: number
+  level?: string
+  jobId?: string
+}): Promise<LogEntry[]> {
+  const base = await getBase()
+  if (!base) return []
+  try {
+    const params = new URLSearchParams()
+    if (opts?.limit) params.set('limit', String(opts.limit))
+    if (opts?.level) params.set('level', opts.level)
+    if (opts?.jobId) params.set('job_id', opts.jobId)
+    const q = params.toString()
+    const r = await fetch(`${base}/v1/logs${q ? `?${q}` : ''}`)
+    if (!r.ok) return []
+    const data = (await r.json()) as { entries: LogEntry[] }
+    return data.entries ?? []
+  } catch {
+    return []
   }
 }
 
@@ -160,16 +194,24 @@ export interface RuntimeStatus {
 
 export interface RuntimePreset {
   id: string
+  preset_id?: string
   label_zh: string
   label_en: string
   tier: string
   modalities: string[]
+  ollama_model: string
   download_size_gb: number
   min_ram_gb: number
   min_vram_gb: number
-  min_unified_memory_gb: number
+  min_unified_memory_gb?: number
   cpu_recommended: boolean
-  downloaded?: boolean
+  installed?: boolean
+  installed_name?: string | null
+  selected?: boolean
+  recommended?: boolean
+  size?: number
+  ollama_note_zh?: string
+  ollama_note_en?: string
 }
 
 export async function fetchRuntimeRecommend(): Promise<RuntimeRecommend | null> {
@@ -209,21 +251,14 @@ export async function fetchPresets(): Promise<RuntimePreset[]> {
   }
 }
 
-export async function startRuntimeSetup(
-  presetId: string | null,
-  preferOllama: boolean
-): Promise<boolean> {
+export async function startRuntimeSetup(): Promise<boolean> {
   const base = await getBase()
   if (!base) return false
   try {
     const r = await fetch(`${base}/v1/runtime/setup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        preset_id: presetId || null,
-        prefer_ollama: preferOllama,
-        confirm: true
-      })
+      body: JSON.stringify({ confirm: true })
     })
     return r.ok
   } catch {
@@ -235,81 +270,31 @@ export interface RuntimeAutoDetect {
   backend: string | null
   url: string | null
   state: string
+  source?: 'app' | 'user' | null
   preset?: string | null
   hardware?: Record<string, unknown> | null
   recommendation?: string | null
 }
 
-export async function autoDetectRuntime(): Promise<RuntimeAutoDetect | null> {
+export async function autoDetectRuntime(opts?: {
+  useUserOllama?: boolean
+  autoSetup?: boolean
+}): Promise<RuntimeAutoDetect | null> {
   const base = await getBase()
   if (!base) return null
   try {
-    const r = await fetch(`${base}/v1/runtime/auto-detect`, { method: 'POST' })
+    const r = await fetch(`${base}/v1/runtime/auto-detect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        use_user_ollama: opts?.useUserOllama ?? true,
+        auto_setup: opts?.autoSetup ?? false
+      })
+    })
     if (!r.ok) return null
     return (await r.json()) as RuntimeAutoDetect
   } catch {
     return null
-  }
-}
-
-// ── Runtime version ──
-
-export interface RuntimeVersion {
-  installed: string | null
-  pinned: string
-  latest: string | null
-  update_available: boolean
-}
-
-export async function fetchRuntimeVersion(): Promise<RuntimeVersion | null> {
-  const base = await getBase()
-  if (!base) return null
-  try {
-    const r = await fetch(`${base}/v1/runtime/version`)
-    if (!r.ok) return null
-    return (await r.json()) as RuntimeVersion
-  } catch {
-    return null
-  }
-}
-
-// ── Local model management ──
-
-export interface DownloadedModel {
-  filename: string
-  path: string
-  size_bytes: number
-  preset_id: string | null
-  preset_label_zh: string | null
-  preset_label_en: string | null
-  is_mmproj: boolean
-}
-
-export interface ModelsResponse {
-  models: DownloadedModel[]
-  total_size_bytes: number
-}
-
-export async function fetchDownloadedModels(): Promise<ModelsResponse | null> {
-  const base = await getBase()
-  if (!base) return null
-  try {
-    const r = await fetch(`${base}/v1/models`)
-    if (!r.ok) return null
-    return (await r.json()) as ModelsResponse
-  } catch {
-    return null
-  }
-}
-
-export async function deleteModel(filename: string): Promise<boolean> {
-  const base = await getBase()
-  if (!base) return false
-  try {
-    const r = await fetch(`${base}/v1/models/${encodeURIComponent(filename)}`, { method: 'DELETE' })
-    return r.ok
-  } catch {
-    return false
   }
 }
 
@@ -339,20 +324,51 @@ export async function exportCookies(browser: string): Promise<CookiesExportResul
 
 // ── Ollama management ──
 
-export interface OllamaStatus {
-  installed: boolean
-  binary_path: string | null
-  running: boolean
-  base_url: string | null
-  version: string | null
-  models: Array<{ name: string; size: number; modified_at: string }>
+export interface OllamaOperation {
+  state: 'idle' | 'working' | 'ready' | 'error'
+  message: string
+  progress: { stage: string; percent: number; message: string }
+  pulling_preset_id: string | null
+  setup_running: boolean
 }
 
-export interface OllamaModel {
-  name: string
-  size: number
-  modified_at: string
-  details?: { family: string; parameter_size: string; quantization: string }
+export interface OllamaCatalog {
+  source: 'app' | 'user' | null
+  running: boolean
+  app_binary_installed: boolean
+  app_download_in_progress?: boolean
+  app_download_error?: string | null
+  models_dir: string
+  selected_preset_id: string | null
+  recommended_preset_id: string | null
+  presets: RuntimePreset[]
+  installed: RuntimePreset[]
+  operation?: OllamaOperation
+}
+
+export interface OllamaStatus {
+  app_binary_installed: boolean
+  app_binary_path: string | null
+  user_binary_path: string | null
+  running: boolean
+  base_url: string | null
+  source: 'app' | 'user' | null
+  models_dir: string
+  version: string | null
+  catalog: OllamaCatalog
+  models: RuntimePreset[]
+}
+
+export async function fetchOllamaCatalog(): Promise<OllamaCatalog | null> {
+  const base = await getBase()
+  if (!base) return null
+  try {
+    const r = await fetch(`${base}/v1/ollama/catalog`)
+    if (!r.ok) return null
+    return (await r.json()) as OllamaCatalog
+  } catch {
+    return null
+  }
 }
 
 export async function fetchOllamaStatus(): Promise<OllamaStatus | null> {
@@ -367,7 +383,12 @@ export async function fetchOllamaStatus(): Promise<OllamaStatus | null> {
   }
 }
 
-export async function downloadOllama(): Promise<{ ok: boolean; error?: string }> {
+export async function downloadOllama(): Promise<{
+  ok: boolean
+  status?: 'started' | 'in_progress' | 'already_installed'
+  path?: string
+  error?: string
+}> {
   const base = await getBase()
   if (!base) return { ok: false, error: 'Sidecar offline' }
   try {
@@ -376,59 +397,148 @@ export async function downloadOllama(): Promise<{ ok: boolean; error?: string }>
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: true })
     })
-    return (await r.json()) as { ok: boolean; error?: string }
+    return (await r.json()) as {
+      ok: boolean
+      status?: 'started' | 'in_progress' | 'already_installed'
+      path?: string
+      error?: string
+    }
   } catch {
     return { ok: false, error: 'Request failed' }
   }
 }
 
-export async function startOllama(): Promise<{ ok: boolean; base_url?: string; error?: string }> {
+export async function startOllama(
+  preferUser = true
+): Promise<{
+  ok: boolean
+  status?: 'ready' | 'started' | 'in_progress'
+  base_url?: string
+  source?: string
+  error?: string
+}> {
   const base = await getBase()
   if (!base) return { ok: false, error: 'Sidecar offline' }
   try {
-    const r = await fetch(`${base}/v1/ollama/start`, { method: 'POST' })
-    return (await r.json()) as { ok: boolean; base_url?: string; error?: string }
+    const r = await fetch(`${base}/v1/ollama/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefer_user: preferUser })
+    })
+    return (await r.json()) as {
+      ok: boolean
+      status?: 'ready' | 'started' | 'in_progress'
+      base_url?: string
+      source?: string
+      error?: string
+    }
   } catch {
     return { ok: false, error: 'Request failed' }
   }
 }
 
-export async function fetchOllamaModels(): Promise<OllamaModel[]> {
+export async function uninstallAppOllama(): Promise<boolean> {
   const base = await getBase()
-  if (!base) return []
+  if (!base) return false
   try {
-    const r = await fetch(`${base}/v1/ollama/models`)
-    if (!r.ok) return []
-    const data = (await r.json()) as { models: OllamaModel[] }
-    return data.models ?? []
+    const r = await fetch(`${base}/v1/ollama/uninstall-app`, { method: 'POST' })
+    return r.ok
   } catch {
-    return []
+    return false
   }
 }
 
-export async function pullOllamaModel(name: string): Promise<{ ok: boolean; error?: string }> {
+export async function pullOllamaPreset(
+  presetId: string
+): Promise<{
+  ok: boolean
+  status?: 'started' | 'in_progress' | 'already_installed'
+  preset_id?: string
+  error?: string
+  name?: string
+}> {
   const base = await getBase()
   if (!base) return { ok: false, error: 'Sidecar offline' }
   try {
     const r = await fetch(`${base}/v1/ollama/pull`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ preset_id: presetId })
     })
-    return (await r.json()) as { ok: boolean; error?: string }
+    const data = (await r.json()) as {
+      ok: boolean
+      status?: 'started' | 'in_progress' | 'already_installed'
+      preset_id?: string
+      error?: string
+      detail?: string
+      name?: string
+    }
+    if (!r.ok) {
+      const msg = data.detail || data.error || `Pull failed (${r.status})`
+      return { ok: false, error: msg }
+    }
+    return data
   } catch {
     return { ok: false, error: 'Request failed' }
   }
 }
 
-export async function deleteOllamaModel(name: string): Promise<boolean> {
+export async function selectOllamaPreset(presetId: string): Promise<boolean> {
+  const base = await getBase()
+  if (!base) return false
+  try {
+    const r = await fetch(`${base}/v1/ollama/select-preset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset_id: presetId })
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+export async function deleteOllamaModel(modelName: string): Promise<boolean> {
   const base = await getBase()
   if (!base) return false
   try {
     const r = await fetch(`${base}/v1/ollama/models`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name })
+      body: JSON.stringify({ name: modelName })
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+// ── Per-modality model routing ──
+
+export async function fetchModalityModels(): Promise<Record<string, string>> {
+  const base = await getBase()
+  if (!base) return {}
+  try {
+    const r = await fetch(`${base}/v1/ollama/modality-models`)
+    if (!r.ok) return {}
+    const data = (await r.json()) as { models: Record<string, string> }
+    return data.models ?? {}
+  } catch {
+    return {}
+  }
+}
+
+export async function setModalityModel(
+  modality: string,
+  model: string
+): Promise<boolean> {
+  const base = await getBase()
+  if (!base) return false
+  try {
+    const r = await fetch(`${base}/v1/ollama/modality-models`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ modality, model })
     })
     return r.ok
   } catch {

@@ -56,6 +56,7 @@ class ClaudeImageModel(ImageModel):
         image_url: str | None = None,
         prompt: str = "",
         timeout: int = 60,
+        language: str = "zh",
     ) -> str:
         if not image_path and not image_url:
             raise ValueError("Either image_path or image_url is required")

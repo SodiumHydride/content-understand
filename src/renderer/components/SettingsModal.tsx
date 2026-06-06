@@ -1,10 +1,8 @@
 import clsx from 'clsx'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import { HardDrive, Trash2, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
-import type { ProviderId } from '../stores/types'
-import { PROVIDER_PRESETS } from '../stores/types'
 import type { AppLocale } from '../lib/i18n'
 import { useEffect, useState } from 'react'
 import {
@@ -13,12 +11,9 @@ import {
   fetchPresets,
   rebuildIndex,
   startRuntimeSetup,
-  fetchDownloadedModels,
-  deleteModel,
   exportCookies,
   type RuntimeRecommend,
-  type RuntimePreset,
-  type DownloadedModel
+  type RuntimePreset
 } from '../lib/sidecar'
 import type { InferenceMode } from '../stores/types'
 import { Select, type SelectOption } from './Select'
@@ -29,20 +24,6 @@ import { OllamaPanel } from './OllamaPanel'
 type SettingsTab = 'general' | 'vault' | 'models' | 'advanced' | 'about'
 
 const tabs: SettingsTab[] = ['general', 'vault', 'models', 'advanced', 'about']
-
-const TIER_LABELS: Record<string, { zh: string; en: string }> = {
-  ultra_lite: { zh: '极轻量', en: 'Ultra Lite' },
-  cpu_lite: { zh: 'CPU 轻量', en: 'CPU Lite' },
-  cpu_balanced: { zh: 'CPU 均衡', en: 'CPU Balanced' },
-  balanced: { zh: '均衡', en: 'Balanced' },
-  quality: { zh: '高质量', en: 'Quality' },
-  high_quality: { zh: '旗舰', en: 'Flagship' }
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
-  return `${(bytes / 1_048_576).toFixed(0)} MB`
-}
 
 export function SettingsModal(): React.JSX.Element | null {
   const { t, i18n } = useTranslation()
@@ -64,9 +45,6 @@ export function SettingsModal(): React.JSX.Element | null {
   const [runtimeState, setRuntimeState] = useState<string>('')
   const [runtimeProgress, setRuntimeProgress] = useState<{ percent: number; message: string } | null>(null)
   const [presets, setPresets] = useState<RuntimePreset[]>([])
-  const [downloaded, setDownloaded] = useState<DownloadedModel[] | null>(null)
-  const [totalSize, setTotalSize] = useState(0)
-  const [deleting, setDeleting] = useState<string | null>(null)
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Poll runtime status when setup is in progress
@@ -85,10 +63,6 @@ export function SettingsModal(): React.JSX.Element | null {
           clearInterval(pollRef.current)
           pollRef.current = null
         }
-        // Refresh downloaded models list
-        void fetchDownloadedModels().then((r) => {
-          if (r) { setDownloaded(r.models); setTotalSize(r.total_size_bytes) }
-        })
       }
     }, 1000)
   }, [])
@@ -109,12 +83,6 @@ export function SettingsModal(): React.JSX.Element | null {
       }
     })
     void fetchPresets().then(setPresets)
-    void fetchDownloadedModels().then((r) => {
-      if (r) {
-        setDownloaded(r.models)
-        setTotalSize(r.total_size_bytes)
-      }
-    })
   }, [open, tab, startPolling])
 
   if (!open) return null
@@ -136,35 +104,6 @@ export function SettingsModal(): React.JSX.Element | null {
     { value: 'local_only', label: t('settings.inferenceLocalOnly') },
     { value: 'api_only', label: t('settings.inferenceApiOnly') }
   ]
-
-  // Group presets by tier, mark downloaded ones
-  const presetOptions: SelectOption[] = presets.map((p) => ({
-    value: p.id,
-    label: `${isZh ? p.label_zh : p.label_en} (${p.download_size_gb} GB)${p.downloaded ? ' ✓' : ''}`,
-    group: isZh
-      ? (TIER_LABELS[p.tier]?.zh ?? p.tier)
-      : (TIER_LABELS[p.tier]?.en ?? p.tier)
-  }))
-
-  // Auto-select downloaded preset if nothing selected
-  const effectivePresetId =
-    settings.localPresetId ||
-    presets.find((p) => p.downloaded)?.id ||
-    runtimeRec?.recommended_preset_id ||
-    ''
-
-  const handleDeleteModel = async (filename: string): Promise<void> => {
-    setDeleting(filename)
-    const ok = await deleteModel(filename)
-    if (ok) {
-      setDownloaded((prev) => prev?.filter((m) => m.filename !== filename) ?? null)
-      setTotalSize((prev) => {
-        const found = downloaded?.find((m) => m.filename === filename)
-        return prev - (found?.size_bytes ?? 0)
-      })
-    }
-    setDeleting(null)
-  }
 
   const persist = async (): Promise<void> => {
     setSaveError(null)
@@ -232,6 +171,30 @@ export function SettingsModal(): React.JSX.Element | null {
                     }}
                   />
                 </Field>
+
+                <Field label={t('settings.outputLanguage')}>
+                  <Select
+                    value={settings.outputLanguage || 'zh'}
+                    options={[
+                      { value: 'zh', label: '中文' },
+                      { value: 'en', label: 'English' }
+                    ]}
+                    onChange={(v) => updateSettings({ outputLanguage: v as 'zh' | 'en' })}
+                  />
+                </Field>
+
+                <Field label={t('settings.promptTemplate')}>
+                  <textarea
+                    value={settings.promptTemplate || ''}
+                    onChange={(e) => updateSettings({ promptTemplate: e.target.value })}
+                    placeholder={t('settings.promptTemplatePlaceholder')}
+                    className="settings-input text-[12px] min-h-[120px] resize-y"
+                    style={{ fontFamily: 'var(--font-mono)' }}
+                  />
+                  <p className="mt-1 text-[11px] text-ink-400">
+                    {t('settings.promptTemplateHint')}
+                  </p>
+                </Field>
               </div>
             )}
 
@@ -289,7 +252,13 @@ export function SettingsModal(): React.JSX.Element | null {
                 </Field>
 
                 {/* ── Local inference (Ollama) ── */}
-                <OllamaPanel isZh={isZh} />
+                <OllamaPanel
+                  isZh={isZh}
+                  localPresetId={settings.localPresetId}
+                  useUserOllama={settings.useOllamaIfAvailable}
+                  onPresetChange={(presetId) => updateSettings({ localPresetId: presetId })}
+                  onUseUserOllamaChange={(value) => updateSettings({ useOllamaIfAvailable: value })}
+                />
 
                 {/* ── Cloud Providers ── */}
                 <Section title={isZh ? '云端 Provider' : 'Cloud Providers'}>
@@ -323,9 +292,78 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {tab === 'advanced' && (
               <div className="space-y-4">
+                {/* ── Video Processing ── */}
+                <Section title={isZh ? '视频处理' : 'Video Processing'}>
+                  <Field label={isZh ? '抽帧率 (FPS)' : 'Frame Rate (FPS)'}>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="5.0"
+                        step="0.1"
+                        value={settings.frameSettings?.fps ?? 1.0}
+                        onChange={(e) => updateSettings({
+                          frameSettings: { ...settings.frameSettings, fps: parseFloat(e.target.value) }
+                        })}
+                        className="flex-1"
+                      />
+                      <span className="text-[11px] text-ink-600 w-8 text-right">
+                        {(settings.frameSettings?.fps ?? 1.0).toFixed(1)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[10px] text-ink-500">
+                      {isZh ? '视频越快运动，FPS 越高。讲座类 0.5~1，运动类 2~5' : 'Higher FPS for fast motion. Lectures: 0.5~1, Sports: 2~5'}
+                    </p>
+                  </Field>
+
+                  <Field label={isZh ? '最大帧数' : 'Max Frames'}>
+                    <Select
+                      value={String(settings.frameSettings?.maxFrames ?? 30)}
+                      options={[
+                        { value: '10', label: '10' },
+                        { value: '20', label: '20' },
+                        { value: '30', label: '30' },
+                        { value: '50', label: '50' },
+                        { value: '100', label: '100' },
+                      ]}
+                      onChange={(v) => updateSettings({
+                        frameSettings: { ...settings.frameSettings, maxFrames: parseInt(v) }
+                      })}
+                    />
+                  </Field>
+
+                  <Field label={isZh ? '帧缩放' : 'Frame Scale'}>
+                    <Select
+                      value={settings.frameSettings?.scale ?? ''}
+                      options={[
+                        { value: '', label: isZh ? '原始分辨率' : 'Original' },
+                        { value: '512:-2', label: '512px' },
+                        { value: '720:-2', label: '720px' },
+                      ]}
+                      onChange={(v) => updateSettings({
+                        frameSettings: { ...settings.frameSettings, scale: v }
+                      })}
+                    />
+                  </Field>
+
+                  <Field label={isZh ? '音频分离' : 'Audio Extraction'}>
+                    <label className="flex items-center gap-2 text-[12px]">
+                      <input
+                        type="checkbox"
+                        checked={settings.audioExtractSettings?.enabled ?? true}
+                        onChange={(e) => updateSettings({
+                          audioExtractSettings: { ...settings.audioExtractSettings, enabled: e.target.checked }
+                        })}
+                      />
+                      {isZh ? '从视频中分离音频轨（供音频模型使用）' : 'Extract audio track from video (for audio models)'}
+                    </label>
+                  </Field>
+                </Section>
+
                 <CookiesSection
                   cookiesPath={settings.cookiesPath}
                   onPathChange={(p) => updateSettings({ cookiesPath: p })}
+                  onAfterExport={pushEngineConfig}
                   isZh={isZh}
                 />
                 <Field label={t('settings.cacheDir')}>
@@ -414,93 +452,15 @@ function Section({
   )
 }
 
-function ModelManager({
-  models,
-  totalSize,
-  deleting,
-  onDelete,
-  isZh
-}: {
-  models: DownloadedModel[] | null
-  totalSize: number
-  deleting: string | null
-  onDelete: (filename: string) => void
-  isZh: boolean
-}): React.JSX.Element {
-  const { t } = useTranslation()
-
-  const mainModels = models?.filter((m) => !m.is_mmproj) ?? []
-  const mmprojFiles = models?.filter((m) => m.is_mmproj) ?? []
-
-  return (
-    <div className="rounded-lg border border-[var(--divider)]">
-      <div className="flex items-center gap-2 border-b border-[var(--divider)] px-3 py-2.5">
-        <HardDrive size={14} className="text-ink-500" />
-        <span className="text-[12px] font-semibold text-ink-800">
-          {t('settings.downloadedModels')}
-        </span>
-        {models !== null && (
-          <span className="ml-auto text-[11px] text-ink-500">
-            {mainModels.length} {t('settings.models')}, {formatBytes(totalSize)}
-          </span>
-        )}
-      </div>
-
-      <div className="max-h-48 overflow-y-auto">
-        {models === null && (
-          <p className="px-3 py-4 text-center text-[11px] text-ink-500">...</p>
-        )}
-        {models !== null && models.length === 0 && (
-          <p className="px-3 py-4 text-center text-[11px] text-ink-500">
-            {t('settings.noModels')}
-          </p>
-        )}
-        {mainModels.map((m) => (
-          <div
-            key={m.filename}
-            className="flex items-center gap-3 border-b border-[var(--divider)] px-3 py-2 last:border-b-0"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[12px] font-medium text-ink-800">
-                {m.preset_label_zh && isZh
-                  ? m.preset_label_zh
-                  : m.preset_label_en ?? m.filename}
-              </p>
-              <p className="text-[10px] text-ink-500">
-                {formatBytes(m.size_bytes)}
-                {m.preset_id && ` · ${m.preset_id}`}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-ghost rounded p-1 text-ink-500 hover:text-[var(--color-danger)]"
-              disabled={deleting === m.filename}
-              onClick={() => onDelete(m.filename)}
-              title={t('settings.deleteModel')}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        ))}
-        {mmprojFiles.length > 0 && (
-          <div className="border-t border-[var(--divider)] px-3 py-1.5 text-[10px] text-ink-500">
-            + {mmprojFiles.length} mmproj {t('settings.files')} ({formatBytes(
-              mmprojFiles.reduce((s, m) => s + m.size_bytes, 0)
-            )})
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function CookiesSection({
   cookiesPath,
   onPathChange,
+  onAfterExport,
   isZh
 }: {
   cookiesPath: string
   onPathChange: (p: string) => void
+  onAfterExport?: () => Promise<boolean>
   isZh: boolean
 }): React.JSX.Element {
   const { t } = useTranslation()
@@ -513,6 +473,9 @@ function CookiesSection({
     const result = await exportCookies(browser)
     if (result.ok && result.path) {
       onPathChange(result.path)
+      if (onAfterExport) {
+        await onAfterExport()
+      }
       setExportResult(isZh ? '导出成功' : 'Exported successfully')
     } else {
       setExportResult(result.error || (isZh ? '导出失败' : 'Export failed'))
