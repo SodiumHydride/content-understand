@@ -43,7 +43,7 @@ from engine.runtime.state import (
 
 logger = logging.getLogger(__name__)
 
-ProgressFn = Callable[[str, int, str], None]
+ProgressFn = Callable[[dict[str, Any]], None]
 
 _manager: RuntimeManager | None = None
 _manager_lock = threading.Lock()
@@ -523,15 +523,16 @@ class RuntimeManager:
         if model_is_installed(raw, model_name):
             return
         if on_progress:
-            on_progress("download", 60, f"pulling {model_name}")
+            on_progress({"stage": "download", "percent": 60, "message": f"pulling {model_name}"})
         if not ollama_pull_model(base, model_name, on_progress=on_progress):
             raise RuntimeError(f"Failed to pull catalog model '{model_name}'")
 
     def _setup_worker(self, on_progress: ProgressFn | None, pull_preset: bool) -> None:
         def prog(stage: str, percent: int, message: str) -> None:
-            self._set_state(progress={"stage": stage, "percent": percent, "message": message})
+            info = {"stage": stage, "percent": percent, "message": message}
+            self._set_state(progress=info)
             if on_progress:
-                on_progress(stage, percent, message)
+                on_progress(info)
 
         try:
             ensure_app_dirs()
@@ -639,30 +640,24 @@ class RuntimeManager:
         }
 
     def _pull_worker(self, preset_id: str) -> None:
-        def prog(info: dict[str, Any] | str, percent: int = 0, message: str = "") -> None:
-            if isinstance(info, dict):
-                stage = info.get("stage", "pull")
-                pct = info.get("percent", 0)
-                msg = info.get("message", "")
-                logger.info("Pull %s: [%s] %s%% %s", preset_id, stage, pct, msg)
-                self._set_state(
-                    progress={
-                        "stage": stage,
-                        "percent": pct,
-                        "message": msg,
-                        "total_bytes": info.get("total_bytes", 0),
-                        "completed_bytes": info.get("completed_bytes", 0),
-                        "speed_bps": info.get("speed_bps", 0.0),
-                        "elapsed_sec": _time_mod.monotonic() - self._pull_start_ts
-                        if hasattr(self, "_pull_start_ts")
-                        else 0.0,
-                    },
-                )
-            else:
-                logger.info("Pull %s: [%s] %s%% %s", preset_id, info, percent, message)
-                self._set_state(
-                    progress={"stage": info, "percent": percent, "message": message},
-                )
+        def prog(info: dict[str, Any]) -> None:
+            stage = info.get("stage", "pull")
+            pct = info.get("percent", 0)
+            msg = info.get("message", "")
+            logger.info("Pull %s: [%s] %s%% %s", preset_id, stage, pct, msg)
+            self._set_state(
+                progress={
+                    "stage": stage,
+                    "percent": pct,
+                    "message": msg,
+                    "total_bytes": info.get("total_bytes", 0),
+                    "completed_bytes": info.get("completed_bytes", 0),
+                    "speed_bps": info.get("speed_bps", 0.0),
+                    "elapsed_sec": _time_mod.monotonic() - self._pull_start_ts
+                    if hasattr(self, "_pull_start_ts")
+                    else 0.0,
+                },
+            )
 
         try:
             logger.info("Pull started: preset=%s", preset_id)

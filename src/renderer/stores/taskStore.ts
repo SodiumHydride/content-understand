@@ -29,9 +29,6 @@ interface TaskStore {
   cancelTask: (id: string) => void
   removeTask: (id: string) => void
   clearCompleted: () => void
-  getActiveTasks: () => Task[]
-  getTaskByModel: (modelName: string, type?: TaskType) => Task | undefined
-  hasActiveTask: (modelName: string, type?: TaskType) => boolean
 }
 
 export const useTaskStore = create<TaskStore>()(
@@ -131,18 +128,5 @@ export const useTaskStore = create<TaskStore>()(
         )
         return { tasks }
       }),
-
-    getActiveTasks: () =>
-      Object.values(get().tasks).filter((t) => t.status === 'running' || t.status === 'queued'),
-
-    getTaskByModel: (modelName, type) =>
-      Object.values(get().tasks).find(
-        (t) =>
-          t.modelName === modelName &&
-          (t.status === 'running' || t.status === 'queued') &&
-          (!type || t.type === type)
-      ),
-
-    hasActiveTask: (modelName, type) => !!get().getTaskByModel(modelName, type)
   }))
 )

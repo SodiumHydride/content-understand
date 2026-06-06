@@ -97,9 +97,9 @@ export function usePullModel() {
           updateProgress(
             taskId,
             p.percent ?? -1,
-            (p as Record<string, unknown>).total_bytes as number,
-            (p as Record<string, unknown>).completed_bytes as number,
-            (p as Record<string, unknown>).speed_bps as number
+            p.total_bytes,
+            p.completed_bytes,
+            p.speed_bps
           )
         }
 

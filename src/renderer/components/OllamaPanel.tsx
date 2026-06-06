@@ -21,28 +21,9 @@ import { useTaskStore } from '../stores/taskStore'
 import { notify } from '../lib/notify'
 import { Select, type SelectOption } from './Select'
 import { useQueryClient } from '@tanstack/react-query'
+import { formatBytes, formatSpeed, formatEta } from '../lib/format'
 
 // ── Helpers ──────────────────────────────────────────────────────
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`
-  return `${(bytes / 1024).toFixed(0)} KB`
-}
-
-function formatSpeed(bps: number): string {
-  if (bps <= 0) return ''
-  if (bps >= 1_048_576) return `${(bps / 1_048_576).toFixed(1)} MB/s`
-  return `${(bps / 1024).toFixed(0)} KB/s`
-}
-
-function formatEta(seconds: number): string {
-  if (seconds <= 0 || !Number.isFinite(seconds)) return ''
-  if (seconds < 60) return `${Math.ceil(seconds)}s`
-  const m = Math.floor(seconds / 60)
-  const s = Math.ceil(seconds % 60)
-  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m ${s}s`
-}
 
 function catalogPresetRows(
   catalog: OllamaCatalog | null,
@@ -166,18 +147,12 @@ export function OllamaPanel({
     setLoading(true)
     setActionMsg(isZh ? '正在启动…' : 'Starting…')
     try {
-      startMutation.mutate(useUserOllama, {
-        onSuccess: (result) => {
-          setActionMsg(
-            result.ok
-              ? `${isZh ? '已连接' : 'Connected'} · ${result.source === 'user' ? (isZh ? '系统' : 'system') : (isZh ? '应用内' : 'app')}`
-              : result.error || (isZh ? '启动失败' : 'Start failed')
-          )
-        },
-        onError: (err) => {
-          setActionMsg(err.message || (isZh ? '启动失败' : 'Start failed'))
-        }
-      })
+      const result = await startMutation.mutateAsync(useUserOllama)
+      setActionMsg(
+        `${isZh ? '已连接' : 'Connected'} · ${result.source === 'user' ? (isZh ? '系统' : 'system') : (isZh ? '应用内' : 'app')}`
+      )
+    } catch (err) {
+      setActionMsg((err as Error).message || (isZh ? '启动失败' : 'Start failed'))
     } finally {
       setLoading(false)
     }

@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
-ProgressFn = Callable[..., None]
+ProgressFn = Callable[[dict[str, Any]], None]
 
 
 def _api_get(base_url: str, path: str, timeout: float = 10) -> dict:
@@ -83,53 +83,11 @@ def list_running(base_url: str) -> list[dict[str, Any]]:
         return []
 
 
-def _call_progress(
-    on_progress: ProgressFn,
-    stage: str,
-    pct: int,
-    message: str,
-    total_bytes: int,
-    completed_bytes: int,
-    speed_bps: float,
-) -> None:
-    """Call progress callback with backward compatibility.
-
-    Tries the new dict-based signature first. If the callback only
-    accepts positional (stage, percent, message), falls back to that.
-    """
-    try:
-        import inspect
-
-        sig = inspect.signature(on_progress)
-        # If the callback accepts **kwargs or a single dict param, use new format
-        params = list(sig.parameters.values())
-        has_var_keyword = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in params
-        )
-        if has_var_keyword or len(params) != 3:
-            on_progress({
-                "stage": stage,
-                "percent": pct,
-                "message": message,
-                "total_bytes": total_bytes,
-                "completed_bytes": completed_bytes,
-                "speed_bps": speed_bps,
-            })
-            return
-    except (ValueError, TypeError):
-        pass
-    # Fallback: old 3-arg signature
-    on_progress(stage, pct, message)
-
-
 def pull_model(base_url: str, name: str, on_progress: ProgressFn | None = None) -> bool:
     """Pull a model from Ollama registry. Streams progress updates.
 
     The on_progress callback receives a dict with keys:
         stage, percent, message, total_bytes, completed_bytes, speed_bps
-
-    Backward compatible: if the callback only accepts 3 positional args,
-    it is called with (stage, percent, message) instead.
 
     Returns True on success, False on failure.
     """
@@ -147,8 +105,6 @@ def pull_model(base_url: str, name: str, on_progress: ProgressFn | None = None) 
         with urlopen(req, timeout=3600) as resp:
             total = 0
             completed = 0
-            prev_completed = 0
-            prev_time = time.monotonic()
             speed_window: list[tuple[float, int]] = []  # (time, completed_bytes)
 
             for raw_line in resp:
@@ -166,11 +122,12 @@ def pull_model(base_url: str, name: str, on_progress: ProgressFn | None = None) 
                 if "completed" in msg:
                     completed = msg["completed"]
 
-                # Compute smoothed speed from rolling window (max 5 samples)
+                # Compute smoothed speed from rolling window (max 5 samples, 10s expiry)
                 now = time.monotonic()
                 speed_bps = 0.0
                 if completed > 0 and "completed" in msg:
                     speed_window.append((now, completed))
+                    speed_window = [(t, c) for t, c in speed_window if now - t < 10]
                     if len(speed_window) > 5:
                         speed_window = speed_window[-5:]
                     if len(speed_window) >= 2:
@@ -182,22 +139,34 @@ def pull_model(base_url: str, name: str, on_progress: ProgressFn | None = None) 
 
                 if on_progress and total > 0:
                     pct = int(completed / total * 100)
-                    _call_progress(
-                        on_progress, "download", pct, status,
-                        total, completed, speed_bps,
-                    )
+                    on_progress({
+                        "stage": "download",
+                        "percent": pct,
+                        "message": status,
+                        "total_bytes": total,
+                        "completed_bytes": completed,
+                        "speed_bps": speed_bps,
+                    })
                 elif on_progress:
-                    _call_progress(
-                        on_progress, "download", 0, status,
-                        total, completed, speed_bps,
-                    )
+                    on_progress({
+                        "stage": "download",
+                        "percent": 0,
+                        "message": status,
+                        "total_bytes": total,
+                        "completed_bytes": completed,
+                        "speed_bps": speed_bps,
+                    })
 
                 if status == "success":
                     if on_progress:
-                        _call_progress(
-                            on_progress, "download", 100, "done",
-                            total, completed, 0.0,
-                        )
+                        on_progress({
+                            "stage": "download",
+                            "percent": 100,
+                            "message": "done",
+                            "total_bytes": total,
+                            "completed_bytes": completed,
+                            "speed_bps": 0.0,
+                        })
                     return True
 
         return True
