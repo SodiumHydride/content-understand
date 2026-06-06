@@ -202,9 +202,7 @@ export function SettingsModal(): React.JSX.Element | null {
                 {/* ── Local inference (Ollama) ── */}
                 <OllamaPanel
                   isZh={isZh}
-                  localPresetId={settings.localPresetId}
                   useUserOllama={settings.useOllamaIfAvailable}
-                  onPresetChange={(presetId) => updateSettings({ localPresetId: presetId })}
                   onUseUserOllamaChange={(value) => updateSettings({ useOllamaIfAvailable: value })}
                 />
 

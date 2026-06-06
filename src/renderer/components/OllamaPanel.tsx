@@ -5,7 +5,6 @@ import { useShallow } from 'zustand/react/shallow'
 import {
   downloadOllama,
   uninstallAppOllama,
-  selectOllamaPreset,
   type OllamaCatalog,
   type RuntimePreset
 } from '../lib/sidecar'
@@ -17,7 +16,6 @@ import {
   useStopOllama
 } from '../hooks/useOllamaQueries'
 import { useTaskStore } from '../stores/taskStore'
-import { Select, type SelectOption } from './Select'
 import { useQueryClient } from '@tanstack/react-query'
 import { formatBytes } from '../lib/format'
 import { deriveOperationProgress, waitForOllamaCatalog } from '../lib/ollamaProgress'
@@ -68,17 +66,13 @@ function resolveHealth(catalog: OllamaCatalog | null): string | undefined {
 
 interface OllamaPanelProps {
   isZh: boolean
-  localPresetId: string
   useUserOllama: boolean
-  onPresetChange: (presetId: string) => void
   onUseUserOllamaChange: (value: boolean) => void
 }
 
 export function OllamaPanel({
   isZh,
-  localPresetId,
   useUserOllama,
-  onPresetChange,
   onUseUserOllamaChange
 }: OllamaPanelProps): React.JSX.Element {
   const queryClient = useQueryClient()
@@ -106,8 +100,6 @@ export function OllamaPanel({
   }, [queryClient])
 
   const presets = catalogPresetRows(catalog, [], catalog?.recommended_preset_id ?? null)
-  const selectedId =
-    localPresetId || catalog?.selected_preset_id || catalog?.recommended_preset_id || ''
   const op = catalog?.operation
   const opBusy =
     op?.state === 'working' || Boolean(op?.pulling_preset_id) || Boolean(op?.setup_running)
@@ -120,15 +112,8 @@ export function OllamaPanel({
     [catalog, presets, isZh, pullTask]
   )
 
-  const handleSelectPreset = async (presetId: string): Promise<void> => {
-    onPresetChange(presetId)
-    await selectOllamaPreset(presetId)
-    refresh()
-  }
-
   const handlePull = (preset: RuntimePreset): void => {
     const id = preset.preset_id ?? preset.id
-    onPresetChange(id)
     pullMutation.mutate({ presetId: id, modelName: preset.ollama_model, isZh })
   }
 
@@ -230,11 +215,6 @@ export function OllamaPanel({
     if (source === 'user') return isZh ? '系统 Ollama' : 'System Ollama'
     return isZh ? '未连接' : 'Offline'
   }
-
-  const presetOptions: SelectOption[] = presets.map((p) => ({
-    value: p.preset_id ?? p.id,
-    label: `${p.recommended ? '★ ' : ''}${isZh ? p.label_zh : p.label_en}`
-  }))
 
   return (
     <div className="space-y-3 rounded-lg border border-[var(--divider)]">
@@ -367,19 +347,6 @@ export function OllamaPanel({
           <p className="text-[11px] text-ink-600">{actionMsg}</p>
         ) : null}
 
-        {presets.length > 0 ? (
-          <div className="space-y-1.5">
-            <span className="settings-field-label">
-              {isZh ? '本地 preset（硬件推荐已标注）' : 'Local preset (★ = recommended)'}
-            </span>
-            <Select
-              value={selectedId}
-              options={presetOptions}
-              onChange={(v) => void handleSelectPreset(v)}
-            />
-          </div>
-        ) : null}
-
         <div className="space-y-1.5">
           <span className="settings-field-label">
             {isZh ? '模型目录' : 'Model catalog'}
@@ -404,7 +371,7 @@ export function OllamaPanel({
                     key={id}
                     className={clsx(
                       'rounded border px-2 py-2 transition-colors',
-                      preset.selected || id === selectedId
+                      preset.selected
                         ? 'border-[var(--color-accent)] bg-[rgb(255_252_249/0.6)]'
                         : 'border-[var(--divider)]'
                     )}

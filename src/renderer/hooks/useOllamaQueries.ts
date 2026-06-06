@@ -72,16 +72,12 @@ export function usePullModel() {
   const completeTask = useTaskStore((s) => s.completeTask)
   const failTask = useTaskStore((s) => s.failTask)
 
-  return useMutation<
-    Awaited<ReturnType<typeof pullOllamaPreset>>,
-    Error,
-    PullModelVars,
-    { taskId: string }
-  >({
-    onMutate: ({ presetId, modelName, isZh }) => {
-      const taskId = `ollama-pull-${presetId}`
-      addTask({
-        id: taskId,
+  // Shared across onMutate + mutationFn (mutations run sequentially)
+  let activeTaskId: string | null = null
+
+  return useMutation({
+    onMutate: ({ presetId, modelName, isZh }: PullModelVars) => {
+      activeTaskId = addTask({
         type: 'pull',
         modelName,
         label: isZh ? `正在拉取 ${modelName}` : `Pulling ${modelName}`,
@@ -89,10 +85,9 @@ export function usePullModel() {
         status: 'running'
       })
       void queryClient.invalidateQueries({ queryKey: ['ollama', 'catalog'] })
-      return { taskId }
     },
     mutationFn: async ({ presetId, isZh }: PullModelVars) => {
-      const taskId = `ollama-pull-${presetId}`
+      const taskId = activeTaskId!
 
       const result = await pullOllamaPreset(presetId)
       if (!result.ok) {
@@ -131,10 +126,12 @@ export function usePullModel() {
       return result
     },
     onSuccess: (_data, vars) => {
+      activeTaskId = null
       notify(vars.isZh ? '模型已就绪' : 'Model ready', { type: 'success' })
       void queryClient.invalidateQueries({ queryKey: ['ollama'] })
     },
     onError: (err: Error, vars) => {
+      activeTaskId = null
       notify(vars.isZh ? '拉取失败' : 'Pull failed', { type: 'error', description: err.message })
     }
   })
