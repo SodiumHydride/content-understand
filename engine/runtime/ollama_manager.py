@@ -570,6 +570,25 @@ def stop_shared_daemon() -> None:
     if _daemon is not None:
         _daemon.stop()
         _daemon = None
+    else:
+        # _daemon is None (sidecar restarted) but app Ollama may still be running.
+        # Find and kill it by checking the app port.
+        from . import port_utils
+        from engine.paths import app_data_root
+        pid = port_utils.find_process_on_port(OLLAMA_APP_PORT)
+        if pid is not None:
+            cmdline = _get_process_cmdline(pid)
+            expected_binary = find_app_binary(app_data_root() / "runtime")
+            if cmdline and expected_binary and str(expected_binary) in cmdline:
+                logger.info("Stopping orphaned app Ollama (PID %d)", pid)
+                import signal as _signal
+                try:
+                    os.kill(pid, _signal.SIGTERM)
+                except OSError:
+                    try:
+                        os.kill(pid, _signal.SIGKILL)
+                    except OSError:
+                        pass
 
 
 # Back-compat helpers used by older call sites
