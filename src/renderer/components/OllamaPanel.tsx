@@ -150,9 +150,14 @@ export function OllamaPanel({
     }
   }
 
-  const handleStop = (): void => {
-    stopMutation.mutate()
-    setActionMsg(isZh ? '已停止' : 'Stopped')
+  const handleStop = async (): Promise<void> => {
+    setActionMsg(isZh ? '正在停止…' : 'Stopping…')
+    try {
+      await stopMutation.mutateAsync()
+      setActionMsg(isZh ? '已停止' : 'Stopped')
+    } catch {
+      setActionMsg(isZh ? '停止失败' : 'Stop failed')
+    }
   }
 
   const handleDownloadBinary = async (): Promise<void> => {
@@ -305,7 +310,7 @@ export function OllamaPanel({
               type="button"
               className="settings-btn-secondary flex items-center gap-2"
               disabled={opBusy}
-              onClick={handleStop}
+              onClick={() => void handleStop()}
             >
               <Square size={14} />
               {isZh ? '停止' : 'Stop'}
