@@ -525,6 +525,7 @@ class OllamaDaemon:
             stderr=subprocess.PIPE,
         )
         self._is_ours = True
+        _write_pid(self.process.pid)
 
         import time
 
@@ -556,6 +557,7 @@ class OllamaDaemon:
             self.process = None
         self.base_url = None
         self._is_ours = False
+        _clear_pid()
 
 
 def get_shared_daemon() -> OllamaDaemon:
@@ -565,18 +567,54 @@ def get_shared_daemon() -> OllamaDaemon:
     return _daemon
 
 
+def _pid_file() -> Path:
+    """PID file for the app-managed Ollama daemon."""
+    from engine.paths import app_data_root
+    return app_data_root() / "runtime" / "ollama.pid"
+
+
+def _write_pid(pid: int) -> None:
+    try:
+        _pid_file().write_text(str(pid))
+    except OSError:
+        pass
+
+
+def _read_pid() -> int | None:
+    try:
+        text = _pid_file().read_text().strip()
+        return int(text) if text else None
+    except (OSError, ValueError):
+        return None
+
+
+def _clear_pid() -> None:
+    try:
+        _pid_file().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _is_process_alive(pid: int) -> bool:
+    """Check if a process with *pid* is still running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def stop_shared_daemon() -> None:
     global _daemon
     if _daemon is not None:
         _daemon.stop()
         _daemon = None
+        _clear_pid()
     else:
-        # _daemon is None (sidecar restarted) but app Ollama may still be running.
-        # Find and kill it by checking the app port.
-        from . import port_utils
-        from engine.paths import app_data_root
-        pid = port_utils.find_process_on_port(OLLAMA_APP_PORT)
-        if pid is not None:
+        # _daemon is None (sidecar restarted) — use PID file to find orphan.
+        pid = _read_pid()
+        if pid is not None and _is_process_alive(pid):
+            # Verify it's actually our app Ollama binary
             cmdline = _get_process_cmdline(pid)
             expected_binary = find_app_binary(app_data_root() / "runtime")
             if cmdline and expected_binary and str(expected_binary) in cmdline:
@@ -589,6 +627,7 @@ def stop_shared_daemon() -> None:
                         os.kill(pid, _signal.SIGKILL)
                     except OSError:
                         pass
+        _clear_pid()
 
 
 # Back-compat helpers used by older call sites
