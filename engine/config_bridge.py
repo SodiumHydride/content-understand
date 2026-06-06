@@ -12,7 +12,6 @@ from content_understand.defaults import (
     CLAUDE_API_BASE,
     CLAUDE_DEFAULT_MODEL,
     GEMINI_DEFAULT_MODEL,
-    LOCAL_SERVER_DEFAULT_MODEL,
     MIMO_API_BASE,
     MIMO_DEFAULT_MODEL,
     OLLAMA_BASE_URL,
@@ -27,7 +26,7 @@ _DEFAULT_MODELS: dict[str, str] = {
     "gemini": GEMINI_DEFAULT_MODEL,
     "claude": CLAUDE_DEFAULT_MODEL,
     "openai_compat": OPENAI_COMPAT_DEFAULT_MODEL,
-    "local_server": LOCAL_SERVER_DEFAULT_MODEL,
+    "local_server": "",  # Resolved at runtime from Ollama model list
 }
 
 # Default API bases (fallback when baseUrl is empty)
@@ -35,6 +34,16 @@ _DEFAULT_BASES: dict[str, str] = {
     "mimo": MIMO_API_BASE,
     "claude": CLAUDE_API_BASE,
 }
+
+
+def _provider_type(pid: str) -> str:
+    if pid == "mimo":
+        return "mimo"
+    if pid == "gemini":
+        return "gemini"
+    if pid == "claude":
+        return "claude"
+    return "openai_compat"
 
 
 def settings_to_config(data: dict[str, Any]) -> ContentConfig:
@@ -59,6 +68,13 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
     default_provider = data.get("defaultProvider", "openai_compat")
 
     rt = get_runtime_manager()
+    rt.set_prefer_user_ollama(bool(data.get("useOllamaIfAvailable", True)))
+    preset_id = (data.get("localPresetId") or "").strip()
+    if preset_id:
+        try:
+            rt.apply_preset(preset_id)
+        except ValueError:
+            pass
     local_base = rt.resolve_local_base_url(inference_mode)
 
     # Build BackendConfig for each enabled provider
@@ -74,6 +90,8 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
 
         # Resolve API keys: env vars > provider config
         keys = _resolve_keys(pid, api_keys_raw)
+        if pid == "local_server" and not keys:
+            keys = ["local"]
 
         # Resolve base URL: provider config > defaults
         if pid == "local_server" and local_base:
@@ -88,7 +106,7 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
             model = _DEFAULT_MODELS.get(pid, "")
 
         backends[pid] = BackendConfig(
-            type="mimo" if pid == "mimo" else ("gemini" if pid == "gemini" else "openai_compat"),
+            type=_provider_type(pid),
             api_base=base_url,
             api_keys=keys,
             model=model,
@@ -100,8 +118,11 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
             type="openai_compat",
             api_base=f"{local_base}/v1" if local_base else f"{OLLAMA_BASE_URL}/v1",
             api_keys=["local"],
-            model=LOCAL_SERVER_DEFAULT_MODEL,
+            model="",
         )
+
+    _apply_local_modality_models(backends["local_server"], rt)
+    _apply_modality_override_models(backends, modality_overrides)
 
     # Build per-modality backend mapping
     content_types = ("video", "image", "audio", "article")
@@ -114,12 +135,21 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
             backend_mapping[ct] = default_provider
 
     # Apply inference mode overrides
-    if inference_mode in ("prefer_local", "local_only") and local_base:
+    if inference_mode == "local_only":
+        for ct in content_types:
+            backend_mapping[ct] = "local_server"
+    elif inference_mode == "prefer_local" and local_base:
         for ct in content_types:
             backend_mapping[ct] = "local_server"
 
+    _validate_backend_mapping(backends, backend_mapping, inference_mode, local_base)
+
     ensure_app_dirs()
     cdir = (data.get("cacheDir") or "").strip() or str(cache_dir())
+
+    # Extract frame settings from UI
+    frame_settings = data.get("frameSettings", {})
+    audio_settings = data.get("audioExtractSettings", {})
 
     return ContentConfig(
         backends=backends,
@@ -128,7 +158,16 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
         audio_backend=backend_mapping.get("audio", default_provider),
         article_backend=backend_mapping.get("article", default_provider),
         cache_dir=cdir,
+        cache_max_age_seconds=int(data.get("cacheMaxAgeSeconds", 3600)),
         bilibili_cookies=(data.get("cookiesPath") or None) or None,
+        output_language=(data.get("outputLanguage") or data.get("language") or "zh").strip(),
+        prompt_template=(data.get("promptTemplate") or "").strip(),
+        frame_fps=float(frame_settings.get("fps", 1.0)),
+        frame_max_frames=int(frame_settings.get("maxFrames", 30)),
+        frame_scale=str(frame_settings.get("scale", "")),
+        frame_strategy=str(frame_settings.get("strategy", "uniform")),
+        audio_extract_enabled=bool(audio_settings.get("enabled", True)),
+        audio_sample_rate=int(audio_settings.get("sampleRate", 16000)),
     )
 
 
@@ -195,13 +234,11 @@ def _legacy_format(data: dict[str, Any]) -> ContentConfig:
             base = (local_base or f"{OLLAMA_BASE_URL}/v1").rstrip("/")
             if not base.endswith("/v1"):
                 base = f"{base}/v1"
-            if not model:
-                model = LOCAL_SERVER_DEFAULT_MODEL
             return BackendConfig(
                 type="openai_compat",
                 api_base=base,
                 api_keys=["local"],
-                model=model,
+                model=model or "",
             )
 
         return BackendConfig(
@@ -244,8 +281,87 @@ def _legacy_format(data: dict[str, Any]) -> ContentConfig:
         audio_backend=effective_backend("audioBackend"),
         article_backend=effective_backend("articleBackend"),
         cache_dir=cdir,
+        cache_max_age_seconds=int(data.get("cacheMaxAgeSeconds", 3600)),
         bilibili_cookies=(data.get("cookiesPath") or None) or None,
+        output_language=(data.get("outputLanguage") or data.get("language") or "zh").strip(),
+        prompt_template=(data.get("promptTemplate") or "").strip(),
     )
+
+
+def _apply_modality_override_models(
+    backends: dict[str, BackendConfig],
+    modality_overrides: dict[str, dict],
+) -> None:
+    """Apply per-modality model picks from the settings UI."""
+    for ct, field in (
+        ("video", "model"),
+        ("image", "image_model"),
+        ("audio", "audio_model"),
+        ("article", "model"),
+    ):
+        override = modality_overrides.get(ct, {})
+        pid = (override.get("providerId") or "").strip()
+        model = (override.get("model") or "").strip()
+        if not pid or not model or pid not in backends:
+            continue
+        bc = backends[pid]
+        if ct == "article":
+            bc.model = model
+        elif field == "model":
+            if not bc.model:
+                bc.model = model
+        else:
+            setattr(bc, field, model)
+
+
+def _validate_backend_mapping(
+    backends: dict[str, BackendConfig],
+    backend_mapping: dict[str, str],
+    inference_mode: str,
+    local_base: str | None,
+) -> None:
+    """Fail early when routing points at a missing or unusable backend."""
+    if inference_mode == "local_only" and not local_base:
+        raise ValueError(
+            "Local-only inference requires a running Ollama instance. "
+            "Start Ollama in Settings or switch inference mode."
+        )
+    for ct, pid in backend_mapping.items():
+        if pid not in backends:
+            raise ValueError(
+                f"Provider '{pid}' for {ct} is not enabled or missing API keys."
+            )
+
+
+def _apply_local_modality_models(local_bc: BackendConfig, rt) -> None:
+    """Inject per-modality models into the local_server backend.
+
+    User-set models (persisted in state.json) take priority over preset
+    defaults, so manually configured non-preset models survive preset changes.
+    """
+    from engine.runtime.state import get_modality_models
+
+    persisted = get_modality_models()
+
+    for modality, attr in (
+        ("video", "model"),
+        ("image", "image_model"),
+        ("audio", "audio_model"),
+        ("article", "model"),
+    ):
+        # 1. User-persisted override wins
+        user_val = persisted.get(modality, "").strip()
+        # 2. Fall back to runtime resolution (preset default)
+        resolved = rt.resolve_model_for_modality(modality)
+        value = user_val or resolved
+        if not value:
+            continue
+        if modality == "article" and attr == "model":
+            # article only sets model if video didn't already set it
+            if not local_bc.model:
+                local_bc.model = value
+        else:
+            setattr(local_bc, attr, value)
 
 
 def _resolve_keys(provider_id: str, config_keys: str) -> list[str]:

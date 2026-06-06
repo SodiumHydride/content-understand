@@ -4,13 +4,21 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
+import logging
+import os
+import platform
+import signal
 import sys
 import threading
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
+_IS_WINDOWS = platform.system() == "Windows"
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -19,9 +27,17 @@ from content_understand.defaults import SIDECAR_PORT
 from engine.config_bridge import settings_to_config
 from engine.index.db import list_pages, open_db
 from engine.index.rebuild import rebuild_from_vault, upsert_single_file
-from engine.paths import ensure_app_dirs, vault_dir
+from engine.paths import app_data_root, ensure_app_dirs, vault_dir
 from engine.runtime.hardware import probe_hardware
 from engine.runtime.manager import get_runtime_manager
+from engine.runtime.port_utils import (
+    cleanup_stale_port,
+    find_process_on_port,
+    is_pid_alive,
+    kill_process_by_pid,
+    read_pid_file,
+    write_pid_file,
+)
 from engine.runtime.presets import list_presets, recommend_preset
 from engine.understand.orchestrate import understand_url
 from engine.write.markdown import write_result
@@ -36,11 +52,115 @@ except ImportError:
     print("Install sidecar deps: pip install fastapi uvicorn pydantic requests", file=sys.stderr)
     sys.exit(1)
 
+
+# ---------------------------------------------------------------------------
+# Process lifecycle management
+# ---------------------------------------------------------------------------
+
+def _pid_file_path() -> Path:
+    return app_data_root() / "runtime" / "sidecar.pid"
+
+
+def _ensure_pid_dir() -> bool:
+    """Create the runtime directory for the PID file. Returns False on failure."""
+    try:
+        _pid_file_path().parent.mkdir(parents=True, exist_ok=True)
+        return True
+    except Exception as exc:
+        logger.warning("Cannot create PID directory: %s", exc)
+        return False
+
+
+_cleanup_done = False
+
+
+def _cleanup_runtime() -> None:
+    """Primary cleanup: shut down Ollama and remove PID file (idempotent)."""
+    global _cleanup_done
+    if _cleanup_done:
+        return
+    _cleanup_done = True
+    logger.info("Cleaning up runtime (pid=%d)...", os.getpid())
+    try:
+        get_runtime_manager().shutdown()
+    except Exception as exc:
+        logger.debug("RuntimeManager.shutdown() failed: %s", exc)
+    try:
+        pid_path = _pid_file_path()
+        if pid_path.exists():
+            pid_path.unlink()
+            logger.debug("Removed PID file %s", pid_path)
+    except Exception as exc:
+        logger.debug("PID file cleanup failed: %s", exc)
+
+
+def _signal_handler(signum: int, frame: Any) -> None:
+    sig_name = signal.Signals(signum).name
+    logger.info("Received %s — shutting down", sig_name)
+    _cleanup_runtime()
+    sys.exit(0)
+
+
+def _handle_old_instance(port: int) -> None:
+    """Check for a stale sidecar PID file and port conflict, resolve them."""
+    pid_path = _pid_file_path()
+    old_pid = read_pid_file(str(pid_path))
+
+    if old_pid is not None:
+        if is_pid_alive(old_pid):
+            # Old process is alive — check if it holds our port
+            port_holder = find_process_on_port(port)
+            if port_holder == old_pid:
+                logger.warning(
+                    "Old sidecar PID %d is alive and holds port %d — killing it",
+                    old_pid,
+                    port,
+                )
+                kill_process_by_pid(old_pid, timeout=3.0)
+            else:
+                logger.info("Old sidecar PID %d is alive but does not hold port %d", old_pid, port)
+        else:
+            logger.info("Removing stale PID file (old PID %d is dead)", old_pid)
+        # Clean up the file either way
+        try:
+            pid_path.unlink()
+        except Exception:
+            pass
+
+    # Even if PID file was missing, check for port conflict
+    if not cleanup_stale_port(port):
+        logger.error("Port %d is occupied and cannot be freed — exiting", port)
+        sys.exit(1)
+
+
+def _register_signal_handlers() -> None:
+    """Register SIGTERM/SIGINT. On Windows, fall back to atexit only."""
+    if _IS_WINDOWS:
+        # Windows has limited signal support; atexit is the primary path
+        logger.debug("Windows detected — using atexit as primary cleanup")
+        return
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+    logger.debug("Registered SIGTERM/SIGINT handlers")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from engine.app_log import init_logging
+    from engine.cache import cleanup_stale_cache
+    from engine.paths import cache_dir
+
     ensure_app_dirs()
+    init_logging()
+
+    # Evict stale cache files on startup
+    try:
+        cleanup_stale_cache(cache_dir())
+    except Exception:
+        pass
+
     yield
-    # Graceful shutdown: stop llama-server before sidecar exits
+    # Graceful shutdown: stop app Ollama daemon before sidecar exits
     try:
         from engine.runtime.manager import get_runtime_manager
         get_runtime_manager().shutdown()
@@ -68,6 +188,9 @@ def vault_path() -> Path:
 
 class IngestRequest(BaseModel):
     url: str
+    output_language: str | None = None  # "zh" | "en" — overrides global setting
+    prompt_template: str | None = None  # custom prompt — overrides global setting
+    output_format: str = "text"  # "text" | "json" — structured output mode
 
 
 class ConfigPayload(BaseModel):
@@ -75,8 +198,6 @@ class ConfigPayload(BaseModel):
 
 
 class RuntimeSetupPayload(BaseModel):
-    preset_id: str | None = None
-    prefer_ollama: bool = False
     confirm: bool = True
 
 
@@ -94,7 +215,18 @@ def _map_progress(stage: str, percent: int, message: str) -> dict:
 import time as _time
 
 
-def _run_ingest(job_id: str, url: str) -> None:
+def _run_ingest(
+    job_id: str,
+    url: str,
+    output_language: str | None = None,
+    prompt_template: str | None = None,
+    output_format: str = "text",
+) -> None:
+    from engine.app_log import bind_job_logger, job_log_lines
+
+    log = bind_job_logger(job_id)
+    last_stage = "resolve"
+
     if not _engine_config:
         with _jobs_lock:
             _jobs[job_id].update(
@@ -102,31 +234,68 @@ def _run_ingest(job_id: str, url: str) -> None:
                     "status": "failed",
                     "error": "No engine config. Open Settings → Models, configure an API key, and click Save.",
                     "progress": _map_progress("model", 0, "no config"),
+                    "logs": job_log_lines(job_id),
                     "_done_at": _time.time(),
                 }
             )
         return
-    cfg = settings_to_config(_engine_config)
+
+    try:
+        cfg = settings_to_config(_engine_config)
+    except ValueError as exc:
+        log.error("Invalid engine config: %s", exc)
+        with _jobs_lock:
+            _jobs[job_id].update(
+                {
+                    "status": "failed",
+                    "error": str(exc)[:500],
+                    "progress": _map_progress("model", 0, str(exc)[:200]),
+                    "logs": job_log_lines(job_id),
+                    "_done_at": _time.time(),
+                }
+            )
+        return
+
+    # Apply per-request overrides
+    if output_language:
+        cfg.output_language = output_language
+    if prompt_template:
+        cfg.prompt_template = prompt_template
 
     def on_progress(stage: str, percent: int, message: str) -> None:
+        nonlocal last_stage
+        last_stage = stage
+        if message:
+            log.info("[%s] %s%% — %s", stage, percent, message)
         with _jobs_lock:
             if job_id in _jobs:
                 _jobs[job_id]["progress"] = _map_progress(stage, percent, message)
 
     try:
+        log.info("Ingest started: %s (lang=%s, format=%s)", url, cfg.output_language, output_format)
         on_progress("resolve", 10, "")
         if Path(url).expanduser().is_file():
             from engine.understand.orchestrate import understand_path
 
-            result = understand_path(url, config=cfg, on_progress=on_progress)
+            result = understand_path(url, config=cfg, on_progress=on_progress,
+                                     output_format=output_format)
         else:
-            result = understand_url(url, config=cfg, on_progress=on_progress)
+            result = understand_url(url, config=cfg, on_progress=on_progress,
+                                    output_format=output_format)
 
         on_progress("write", 90, "")
         vp = vault_path()
         path = write_result(vp, result)
         slug = str(path.relative_to(vp).with_suffix("")).replace("\\", "/")
         upsert_single_file(vp, path)
+        log.info("Ingest completed → %s", slug)
+
+        # Evict stale cache files after successful ingest
+        try:
+            from engine.cache import cleanup_stale_cache
+            cleanup_stale_cache(Path(cfg.cache_dir), cfg.cache_max_age_seconds)
+        except Exception:
+            pass
 
         with _jobs_lock:
             _jobs[job_id].update(
@@ -134,16 +303,20 @@ def _run_ingest(job_id: str, url: str) -> None:
                     "status": "completed",
                     "progress": _map_progress("write", 100, ""),
                     "result_slug": slug,
+                    "logs": job_log_lines(job_id),
                     "_done_at": _time.time(),
                 }
             )
     except Exception as exc:
+        log.error("Ingest failed at %s: %s", last_stage, exc, exc_info=True)
+        fail_stage = last_stage if last_stage in ("resolve", "download", "model", "write") else "model"
         with _jobs_lock:
             _jobs[job_id].update(
                 {
                     "status": "failed",
                     "error": str(exc)[:500],
-                    "progress": _map_progress("model", 0, str(exc)[:200]),
+                    "progress": _map_progress(fail_stage, 0, str(exc)[:200]),
+                    "logs": job_log_lines(job_id),
                     "_done_at": _time.time(),
                 }
             )
@@ -226,16 +399,7 @@ def runtime_recommend():
 
 @app.get("/v1/runtime/presets")
 def runtime_presets():
-    from engine.paths import models_dir
-    from engine.runtime.download import preset_model_paths
-
-    mdir = models_dir()
-    result = []
-    for p in list_presets():
-        main, mmproj = preset_model_paths(p, mdir)
-        entry = {**p, "downloaded": main is not None and main.exists()}
-        result.append(entry)
-    return {"presets": result}
+    return {"presets": list_presets()}
 
 
 @app.post("/v1/runtime/setup")
@@ -243,28 +407,8 @@ def runtime_setup(body: RuntimeSetupPayload):
     if not body.confirm:
         raise HTTPException(400, "confirm required")
     rt = get_runtime_manager()
-    rt.setup_async(body.preset_id, prefer_ollama=body.prefer_ollama)
+    rt.setup_async()
     return {"ok": True, "state": rt.state}
-
-
-@app.get("/v1/runtime/version")
-def runtime_version():
-    """Check installed vs latest llama.cpp version."""
-    from engine.paths import app_data_root
-    from engine.runtime.llama_install import (
-        LLAMA_RELEASE_TAG,
-        _installed_version,
-        check_latest_version,
-    )
-
-    installed = _installed_version(app_data_root() / "runtime")
-    latest = check_latest_version()
-    return {
-        "installed": installed,
-        "pinned": LLAMA_RELEASE_TAG,
-        "latest": latest,
-        "update_available": installed is not None and latest is not None and installed != latest,
-    }
 
 
 @app.get("/v1/providers/models")
@@ -283,8 +427,10 @@ def provider_models(provider: str, base_url: str = "", api_key: str = ""):
             return {"models": []}
         return {"models": _fetch_openai_models(base_url, api_key)}
     if provider == "local_server":
-        from engine.runtime.presets import list_presets
-        return {"models": [p["id"] for p in list_presets()]}
+        rt = get_runtime_manager()
+        catalog = rt.catalog()
+        installed = [p["ollama_model"] for p in catalog.get("installed", [])]
+        return {"models": installed}
     return {"models": []}
 
 
@@ -311,39 +457,48 @@ def runtime_stop():
     return {"ok": True}
 
 
-@app.post("/v1/runtime/auto-detect")
-def runtime_auto_detect():
-    """Startup auto-detection: Ollama > existing GGUF > idle."""
-    rt = get_runtime_manager()
-    if rt.state == "ready":
-        return {"backend": rt.backend, "url": rt.local_base_url, "state": "ready"}
+class AutoDetectPayload(BaseModel):
+    use_user_ollama: bool = True
+    auto_setup: bool = False
 
+
+@app.post("/v1/runtime/auto-detect")
+def runtime_auto_detect(body: AutoDetectPayload | None = None):
+    """Startup auto-detection: user Ollama > app Ollama > idle (optional setup)."""
+    payload = body or AutoDetectPayload()
+    rt = get_runtime_manager()
+    rt.set_prefer_user_ollama(payload.use_user_ollama)
     rt.refresh_hardware()
 
-    # Fast path: Ollama already running — just mark ready, no async needed
-    from engine.runtime.ollama import detect_ollama
-
-    ollama = detect_ollama(timeout=1.0)
-    if ollama.get("available"):
-        rt.mark_ollama_ready(ollama["base_url"])
-        return {"backend": "ollama", "url": ollama["base_url"], "state": "ready"}
-
-    # Check if GGUF already downloaded — don't auto-start, let on-demand handle it
-    from engine.paths import models_dir
-    from engine.runtime.download import preset_model_paths
-    from engine.runtime.presets import recommend_preset
-
-    preset = recommend_preset(rt.hardware)
-    main_gguf, mmproj = preset_model_paths(preset, models_dir())
-    if main_gguf and main_gguf.exists():
+    if rt.state == "ready" and rt.local_base_url:
         return {
-            "backend": "llama_server",
-            "state": "available",
-            "preset": preset["id"],
-            "hardware": rt.hardware.to_dict() if rt.hardware else None,
+            "backend": "ollama",
+            "url": rt.local_base_url,
+            "state": "ready",
+            "source": rt.ollama_source,
         }
 
-    # Nothing available
+    from engine.paths import app_data_root
+    from engine.runtime.ollama_manager import resolve_active_ollama
+
+    base, source = resolve_active_ollama(
+        app_data_root() / "runtime",
+        prefer_user=payload.use_user_ollama,
+    )
+    if base and source:
+        rt.mark_ollama_ready(base, source)
+        return {
+            "backend": "ollama",
+            "url": base,
+            "state": "ready",
+            "source": source,
+        }
+
+    if payload.auto_setup:
+        rt.setup_async(prefer_user=payload.use_user_ollama)
+        return {"backend": "ollama", "state": "working", "source": None}
+
+    preset = recommend_preset(rt.hardware) if rt.hardware else {}
     rt.mark_idle()
     return {
         "backend": None,
@@ -353,92 +508,6 @@ def runtime_auto_detect():
     }
 
 
-@app.get("/v1/models")
-def list_models():
-    """List downloaded local models with sizes."""
-    from engine.paths import models_dir
-    from engine.runtime.presets import list_presets
-
-    mdir = models_dir()
-    presets = list_presets()
-
-    # Map filename → preset info
-    file_to_preset: dict[str, dict] = {}
-    for p in presets:
-        for spec in p.get("files", []):
-            file_to_preset[spec["filename"]] = p
-
-    models = []
-    if mdir.exists():
-        for f in sorted(mdir.iterdir()):
-            if f.is_file() and f.suffix in (".gguf", ".bin"):
-                preset = file_to_preset.get(f.name)
-                models.append({
-                    "filename": f.name,
-                    "path": str(f),
-                    "size_bytes": f.stat().st_size,
-                    "preset_id": preset["id"] if preset else None,
-                    "preset_label_zh": preset.get("label_zh") if preset else None,
-                    "preset_label_en": preset.get("label_en") if preset else None,
-                    "is_mmproj": "mmproj" in f.name.lower(),
-                })
-            elif f.is_dir():
-                # hf_hub may nest in subdirectories
-                for sub in f.iterdir():
-                    if sub.is_file() and sub.suffix in (".gguf", ".bin"):
-                        preset = file_to_preset.get(sub.name)
-                        models.append({
-                            "filename": sub.name,
-                            "path": str(sub),
-                            "size_bytes": sub.stat().st_size,
-                            "preset_id": preset["id"] if preset else None,
-                            "preset_label_zh": preset.get("label_zh") if preset else None,
-                            "preset_label_en": preset.get("label_en") if preset else None,
-                            "is_mmproj": "mmproj" in sub.name.lower(),
-                        })
-
-    total = sum(m["size_bytes"] for m in models)
-    return {"models": models, "total_size_bytes": total}
-
-
-@app.delete("/v1/models/{filename:path}")
-def delete_model(filename: str):
-    """Delete a downloaded model file."""
-    from engine.paths import models_dir
-
-    mdir = models_dir()
-    target = mdir / filename
-
-    # Security: prevent path traversal
-    try:
-        target = target.resolve()
-        mdir_resolved = mdir.resolve()
-        if not str(target).startswith(str(mdir_resolved)):
-            raise HTTPException(status_code=400, detail="Invalid path")
-    except (ValueError, OSError):
-        raise HTTPException(status_code=400, detail="Invalid path")
-
-    if not target.exists():
-        # Try subdirectories
-        found = None
-        for f in mdir.rglob(filename):
-            if f.is_file():
-                found = f
-                break
-        if found:
-            target = found
-        else:
-            raise HTTPException(status_code=404, detail="File not found")
-
-    size = target.stat().st_size
-    target.unlink()
-    # Remove parent dir if empty (for hf_hub nested structure)
-    parent = target.parent
-    if parent != mdir and not any(parent.iterdir()):
-        parent.rmdir()
-
-    return {"deleted": filename, "size_bytes": size}
-
 
 class CookiesExportPayload(BaseModel):
     browser: str = "chrome"
@@ -446,34 +515,18 @@ class CookiesExportPayload(BaseModel):
 
 @app.post("/v1/cookies/export")
 def export_cookies(body: CookiesExportPayload):
-    """Export cookies from browser using yt-dlp. Saves to app data dir."""
-    import subprocess
-
+    """Export cookies from browser (direct jar dump — no Bilibili URL fetch)."""
+    from engine.cookies_export import export_browser_cookies
     from engine.paths import app_data_root
 
     dest = app_data_root() / "bilibili-cookies.txt"
     try:
-        result = subprocess.run(
-            [
-                sys.executable, "-m", "yt_dlp",
-                "--cookies-from-browser", body.browser,
-                "--cookies", str(dest),
-                "https://www.bilibili.com",
-                "--skip-download",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            return {"ok": False, "error": result.stderr.strip()[:500]}
-        if not dest.exists():
-            return {"ok": False, "error": "Cookies file was not created"}
-        return {"ok": True, "path": str(dest), "size": dest.stat().st_size}
-    except FileNotFoundError:
-        return {"ok": False, "error": "yt-dlp not found. Install with: pip install yt-dlp"}
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "Export timed out (30s)"}
+        size = export_browser_cookies(body.browser, dest)
+        return {"ok": True, "path": str(dest), "size": size}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)[:500]}
+    except RuntimeError as exc:
+        return {"ok": False, "error": str(exc)[:500]}
     except Exception as exc:
         return {"ok": False, "error": str(exc)[:500]}
 
@@ -481,35 +534,47 @@ def export_cookies(body: CookiesExportPayload):
 # ── Ollama management ──
 
 
+@app.get("/v1/ollama/catalog")
+def ollama_catalog():
+    """Curated preset catalog merged with install state."""
+    rt = get_runtime_manager()
+    if rt.hardware is None:
+        rt.refresh_hardware()
+    return rt.catalog()
+
+
 @app.get("/v1/ollama/status")
 def ollama_status():
-    """Check Ollama availability: installed, running, version."""
-    from engine.paths import app_data_root
-    from engine.runtime.ollama_api import get_version, list_models as ollama_list
+    """Check Ollama availability: app binary, running instance, catalog models."""
+    from engine.paths import app_data_root, models_dir
+    from engine.runtime.ollama_api import get_version
+    from engine.runtime.ollama_api import list_models as ollama_list
+    from engine.runtime.ollama_catalog import filter_installed_models
     from engine.runtime.ollama_manager import (
-        detect_existing_ollama,
-        find_ollama_binary,
-        is_ollama_installed,
+        app_binary_path,
+        find_user_binary,
+        is_app_ollama_installed,
+        resolve_active_ollama,
     )
 
     runtime_dir = app_data_root() / "runtime"
-    installed = is_ollama_installed(runtime_dir)
-    binary = find_ollama_binary(runtime_dir)
-    existing = detect_existing_ollama()
+    base, source = resolve_active_ollama(runtime_dir)
+    catalog = get_runtime_manager().catalog()
 
     result = {
-        "installed": installed,
-        "binary_path": str(binary) if binary else None,
-        "running": existing is not None,
-        "base_url": existing,
-        "version": None,
-        "models": [],
+        "app_binary_installed": is_app_ollama_installed(runtime_dir),
+        "app_binary_path": str(app_binary_path(runtime_dir)),
+        "user_binary_path": str(find_user_binary()) if find_user_binary() else None,
+        "running": base is not None,
+        "base_url": base,
+        "source": source,
+        "models_dir": str(models_dir()),
+        "version": get_version(base) if base else None,
+        "catalog": catalog,
+        "models": catalog.get("installed", []),
     }
-
-    if existing:
-        result["version"] = get_version(existing)
-        result["models"] = ollama_list(existing)
-
+    if base:
+        result["models"] = filter_installed_models(ollama_list(base))
     return result
 
 
@@ -519,80 +584,161 @@ class OllamaDownloadPayload(BaseModel):
 
 @app.post("/v1/ollama/download")
 def ollama_download(body: OllamaDownloadPayload):
-    """Download Ollama binary to app data."""
+    """Download Ollama binary to app data (background thread — does not block other APIs)."""
     if not body.confirm:
         raise HTTPException(400, "confirm required")
 
     from engine.paths import app_data_root
-    from engine.runtime.ollama_manager import download_ollama
+    from engine.runtime.ollama_manager import start_app_ollama_download
 
     runtime_dir = app_data_root() / "runtime"
-    try:
-        binary = download_ollama(runtime_dir)
-        return {"ok": True, "path": str(binary)}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)[:500]}
+    return start_app_ollama_download(runtime_dir)
+
+
+class OllamaStartPayload(BaseModel):
+    prefer_user: bool = True
 
 
 @app.post("/v1/ollama/start")
-def ollama_start():
-    """Start Ollama daemon."""
-    from engine.paths import app_data_root, models_dir
-    from engine.runtime.ollama_manager import OllamaDaemon, detect_existing_ollama
+def ollama_start(body: OllamaStartPayload | None = None):
+    """Start or attach to an Ollama instance (non-blocking when startup is needed)."""
+    from engine.paths import app_data_root
+    from engine.runtime.ollama_manager import resolve_active_ollama
 
-    existing = detect_existing_ollama()
-    if existing:
-        return {"ok": True, "base_url": existing, "reused": True}
+    payload = body or OllamaStartPayload()
+    rt = get_runtime_manager()
+    rt.set_prefer_user_ollama(payload.prefer_user)
 
     runtime_dir = app_data_root() / "runtime"
-    daemon = OllamaDaemon()
-    try:
-        base = daemon.start(runtime_dir, models_dir())
-        return {"ok": True, "base_url": base, "reused": False}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)[:500]}
+    base, source = resolve_active_ollama(runtime_dir, prefer_user=payload.prefer_user)
+    if base:
+        rt.mark_ollama_ready(base, source or "user")
+        return {
+            "ok": True,
+            "status": "ready",
+            "base_url": base,
+            "source": source,
+            "reused": True,
+        }
+
+    if rt.state == "working":
+        return {"ok": True, "status": "in_progress"}
+
+    rt.setup_async(prefer_user=payload.prefer_user, pull_preset=False)
+    return {"ok": True, "status": "started"}
 
 
 @app.post("/v1/ollama/stop")
 def ollama_stop():
-    """Stop Ollama daemon (only if we started it)."""
-    from engine.runtime.ollama_manager import OllamaDaemon
+    """Stop app-managed Ollama only."""
+    get_runtime_manager().stop()
+    return {"ok": True, "message": "App Ollama stopped"}
 
-    # For now, this is a no-op — we don't persist the daemon instance across requests.
-    # The daemon is managed by the sidecar process lifecycle.
-    return {"ok": True, "message": "Ollama will stop when the app exits"}
+
+@app.post("/v1/ollama/uninstall-app")
+def ollama_uninstall_app():
+    """Remove app-managed Ollama binary from app storage."""
+    get_runtime_manager().uninstall_app_ollama()
+    return {"ok": True}
 
 
 @app.get("/v1/ollama/models")
 def ollama_models():
-    """List models available in Ollama."""
+    """List installed catalog models only."""
+    catalog = get_runtime_manager().catalog()
+    return {"models": catalog.get("installed", [])}
+
+
+@app.get("/v1/ollama/installed-all")
+def ollama_installed_all():
+    """List ALL installed Ollama models (preset + non-preset).
+
+    Returns ``{models: [{name, size, is_preset, preset_id, modalities}]}``.
+    """
+    from engine.paths import app_data_root
     from engine.runtime.ollama_api import list_models as ollama_list
-    from engine.runtime.ollama_manager import detect_existing_ollama
+    from engine.runtime.ollama_catalog import (
+        filter_installed_models,
+        installed_non_preset_models,
+    )
+    from engine.runtime.ollama_manager import resolve_active_ollama
 
-    base = detect_existing_ollama()
+    runtime_dir = app_data_root() / "runtime"
+    base, _source = resolve_active_ollama(runtime_dir)
     if not base:
-        return {"models": [], "error": "Ollama not running"}
+        return {"models": []}
 
-    models = ollama_list(base)
-    return {"models": models}
+    raw = ollama_list(base)
+    out: list[dict[str, Any]] = []
+
+    # Preset models
+    for m in filter_installed_models(raw):
+        out.append({
+            "name": m.get("installed_name") or m.get("ollama_model", ""),
+            "size": m.get("size", 0),
+            "is_preset": True,
+            "preset_id": m.get("preset_id"),
+            "modalities": m.get("modalities", []),
+        })
+
+    # Non-preset (user-installed) models
+    for m in installed_non_preset_models(raw):
+        out.append({
+            "name": m["name"],
+            "size": m.get("size", 0),
+            "is_preset": False,
+            "preset_id": None,
+            "modalities": m.get("modalities_guess", ["article"]),
+        })
+
+    return {"models": out}
 
 
 class OllamaPullPayload(BaseModel):
-    name: str
+    preset_id: str | None = None
+    name: str | None = None
 
 
 @app.post("/v1/ollama/pull")
 def ollama_pull(body: OllamaPullPayload):
-    """Pull a model from Ollama registry."""
+    """Pull a curated catalog model (by preset_id or catalog model name)."""
+    from engine.paths import app_data_root
     from engine.runtime.ollama_api import pull_model as ollama_pull_model
-    from engine.runtime.ollama_manager import detect_existing_ollama
+    from engine.runtime.ollama_catalog import validate_catalog_model, validate_preset_pull
+    from engine.runtime.ollama_manager import resolve_active_ollama
 
-    base = detect_existing_ollama()
+    rt = get_runtime_manager()
+    try:
+        if body.preset_id:
+            validate_preset_pull(body.preset_id)
+            return rt.pull_preset_async(body.preset_id)
+        if body.name:
+            model_name = validate_catalog_model(body.name)
+        else:
+            raise HTTPException(400, "preset_id or name required")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    from engine.runtime.ollama_catalog import preset_for_model
+
+    found = preset_for_model(model_name)
+    if found:
+        return rt.pull_preset_async(found["id"])
+
+    base, _ = resolve_active_ollama(app_data_root() / "runtime")
     if not base:
-        raise HTTPException(400, "Ollama not running")
+        rt.setup_async(prefer_user=rt.prefer_user_ollama(), pull_preset=False)
+        return {"ok": True, "status": "started", "name": model_name}
 
-    ok = ollama_pull_model(base, body.name)
-    return {"ok": ok, "name": body.name}
+    def _bg_pull() -> None:
+        try:
+            ollama_pull_model(base, model_name)
+            logger.info("Pull completed: %s", model_name)
+        except Exception:
+            logger.exception("Pull failed: %s", model_name)
+
+    threading.Thread(target=_bg_pull, daemon=True, name="ollama-pull-name").start()
+    return {"ok": True, "status": "started", "name": model_name}
 
 
 class OllamaDeletePayload(BaseModel):
@@ -601,16 +747,65 @@ class OllamaDeletePayload(BaseModel):
 
 @app.delete("/v1/ollama/models")
 def ollama_delete_model(body: OllamaDeletePayload):
-    """Delete a model from Ollama."""
+    """Delete a catalog model from the active Ollama instance."""
+    from engine.paths import app_data_root
     from engine.runtime.ollama_api import delete_model as ollama_delete
-    from engine.runtime.ollama_manager import detect_existing_ollama
+    from engine.runtime.ollama_catalog import validate_catalog_model
+    from engine.runtime.ollama_manager import resolve_active_ollama
 
-    base = detect_existing_ollama()
+    try:
+        model_name = validate_catalog_model(body.name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    base, _ = resolve_active_ollama(app_data_root() / "runtime")
     if not base:
         raise HTTPException(400, "Ollama not running")
 
-    ok = ollama_delete(base, body.name)
-    return {"ok": ok, "name": body.name}
+    ok = ollama_delete(base, model_name)
+    return {"ok": ok, "name": model_name}
+
+
+class OllamaSelectPresetPayload(BaseModel):
+    preset_id: str
+
+
+@app.post("/v1/ollama/select-preset")
+def ollama_select_preset(body: OllamaSelectPresetPayload):
+    """Select active preset and apply default modality routing."""
+    rt = get_runtime_manager()
+    try:
+        preset = rt.apply_preset(body.preset_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "ok": True,
+        "preset_id": body.preset_id,
+        "ollama_model": preset.get("ollama_model"),
+        "modality_models": rt.get_all_modality_models(),
+    }
+
+
+class ModalityModelPayload(BaseModel):
+    modality: str  # video | image | audio | article
+    model: str  # Ollama model name, e.g. "qwen2.5-vl:7b"
+
+
+@app.get("/v1/ollama/modality-models")
+def get_modality_models():
+    """Get per-modality model routing config."""
+    rt = get_runtime_manager()
+    return {"models": rt.get_all_modality_models()}
+
+
+@app.put("/v1/ollama/modality-models")
+def set_modality_model(body: ModalityModelPayload):
+    """Set model for a specific modality."""
+    if body.modality not in ("video", "image", "audio", "article"):
+        raise HTTPException(400, "modality must be video, image, audio, or article")
+    rt = get_runtime_manager()
+    rt.set_modality_model(body.modality, body.model)
+    return {"ok": True, "modality": body.modality, "model": body.model}
 
 
 @app.get("/v1/library")
@@ -695,7 +890,11 @@ def ingest(req: IngestRequest):
             "url": req.url,
             "_created_at": _time.time(),
         }
-    threading.Thread(target=_run_ingest, args=(job_id, req.url.strip()), daemon=True).start()
+    threading.Thread(
+        target=_run_ingest,
+        args=(job_id, req.url.strip(), req.output_language, req.prompt_template, req.output_format),
+        daemon=True,
+    ).start()
     return {"job_id": job_id}
 
 
@@ -711,7 +910,16 @@ def job_status(job_id: str):
         "progress": job.get("progress"),
         "error": job.get("error"),
         "result_slug": job.get("result_slug"),
+        "logs": job.get("logs", []),
     }
+
+
+@app.get("/v1/logs")
+def get_logs(limit: int = 100, level: str | None = None, job_id: str | None = None):
+    """Recent sidecar log lines for debugging."""
+    from engine.app_log import recent_logs
+
+    return {"entries": recent_logs(limit=limit, level=level, job_id=job_id)}
 
 
 @app.post("/v1/index/rebuild")
@@ -720,11 +928,79 @@ def index_rebuild():
     return {"rebuilt": n}
 
 
+class CanvasAssetPayload(BaseModel):
+    data: str
+    mimeType: str
+    name: str = ""
+
+
+@app.get("/v1/thinking-canvas")
+def get_thinking_canvas():
+    from engine.thinking_canvas.store import load_document
+
+    return load_document()
+
+
+@app.put("/v1/thinking-canvas")
+def put_thinking_canvas(body: dict[str, Any]):
+    from engine.thinking_canvas.store import save_document
+
+    return save_document(body)
+
+
+@app.post("/v1/thinking-canvas/assets")
+def post_thinking_canvas_asset(body: CanvasAssetPayload):
+    import base64
+
+    from engine.thinking_canvas.store import save_asset
+
+    try:
+        raw = base64.b64decode(body.data)
+    except Exception as exc:
+        raise HTTPException(400, f"invalid base64: {exc}") from exc
+    return save_asset(raw, body.mimeType, name=body.name)
+
+
+@app.get("/v1/thinking-canvas/assets/{asset_id}")
+def get_thinking_canvas_asset(asset_id: str):
+    from fastapi.responses import Response
+
+    from engine.thinking_canvas.store import read_asset
+
+    try:
+        data, mime = read_asset(asset_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "asset not found") from None
+    return Response(content=data, media_type=mime)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=SIDECAR_PORT)
     args = parser.parse_args()
+
+    # 1. Prepare app directories
     ensure_app_dirs()
+    if not _ensure_pid_dir():
+        logger.warning("PID file directory unavailable — PID management disabled")
+
+    # 2. Handle stale old instance (PID file + port conflict)
+    _handle_old_instance(args.port)
+
+    # 3. Register cleanup handler
+    # Note: SIGTERM/SIGINT handlers are NOT registered here because uvicorn
+    # overrides them with its own handlers. Instead, we rely on:
+    #   - FastAPI lifespan (yield-based shutdown) as primary
+    #   - atexit as fallback for unexpected exits
+    atexit.register(_cleanup_runtime)
+
+    # 4. Write PID file for this instance
+    pid_path = _pid_file_path()
+    if _ensure_pid_dir():
+        write_pid_file(str(pid_path))
+        logger.info("Sidecar starting (pid=%d, port=%d)", os.getpid(), args.port)
+
+    # 5. Run server (blocks until shutdown)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
 
 
