@@ -8,6 +8,7 @@ import { MapView } from './MapView'
 import { NotePreview } from './NotePreview'
 import { SettingsModal } from './SettingsModal'
 import { SetupBanner } from './SetupBanner'
+import { TaskBar } from './TaskBar'
 import { useAppStore } from '../stores/appStore'
 import { getReaderPresentation } from '../lib/readerPresentation'
 
@@ -40,6 +41,7 @@ export function Layout({ children }: { children?: ReactNode }): React.JSX.Elemen
           </div>
           {showOverlayReader ? <NotePreview presentation="overlay" /> : null}
           {showCenterReader ? <NotePreview presentation="center" /> : null}
+          <TaskBar />
         </div>
       </div>
       {children}

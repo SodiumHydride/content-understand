@@ -20,10 +20,11 @@ import { Select, type SelectOption } from './Select'
 import { ProviderCard } from './ProviderCard'
 import { ModalityRouter } from './ModalityRouter'
 import { OllamaPanel } from './OllamaPanel'
+import { LogViewer } from './LogViewer'
 
-type SettingsTab = 'general' | 'vault' | 'models' | 'advanced' | 'about'
+type SettingsTab = 'general' | 'vault' | 'models' | 'logs' | 'advanced' | 'about'
 
-const tabs: SettingsTab[] = ['general', 'vault', 'models', 'advanced', 'about']
+const tabs: SettingsTab[] = ['general', 'vault', 'models', 'logs', 'advanced', 'about']
 
 export function SettingsModal(): React.JSX.Element | null {
   const { t, i18n } = useTranslation()
@@ -287,6 +288,12 @@ export function SettingsModal(): React.JSX.Element | null {
                     isZh={isZh}
                   />
                 </Section>
+              </div>
+            )}
+
+            {tab === 'logs' && (
+              <div className="h-[500px]">
+                <LogViewer isZh={isZh} />
               </div>
             )}
 

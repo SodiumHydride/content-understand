@@ -327,7 +327,15 @@ export async function exportCookies(browser: string): Promise<CookiesExportResul
 export interface OllamaOperation {
   state: 'idle' | 'working' | 'ready' | 'error'
   message: string
-  progress: { stage: string; percent: number; message: string }
+  progress: {
+    stage: string
+    percent: number
+    message: string
+    total_bytes?: number
+    completed_bytes?: number
+    speed_bps?: number
+    elapsed_sec?: number
+  }
   pulling_preset_id: string | null
   setup_running: boolean
 }
@@ -357,6 +365,17 @@ export interface OllamaStatus {
   version: string | null
   catalog: OllamaCatalog
   models: RuntimePreset[]
+  ollama_health?: 'unknown' | 'healthy' | 'unhealthy' | 'restarting' | 'error'
+  ollama_last_health_check?: number
+  ollama_restart_count?: number
+}
+
+export interface InstalledModel {
+  name: string
+  size: number
+  is_preset: boolean
+  preset_id?: string
+  modalities?: string[]
 }
 
 export async function fetchOllamaCatalog(): Promise<OllamaCatalog | null> {
@@ -510,6 +529,30 @@ export async function deleteOllamaModel(modelName: string): Promise<boolean> {
     return r.ok
   } catch {
     return false
+  }
+}
+
+export async function stopOllama(): Promise<boolean> {
+  const base = await getBase()
+  if (!base) return false
+  try {
+    const r = await fetch(`${base}/v1/ollama/stop`, { method: 'POST' })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+export async function fetchAllInstalledModels(): Promise<InstalledModel[]> {
+  const base = await getBase()
+  if (!base) return []
+  try {
+    const r = await fetch(`${base}/v1/ollama/installed-all`)
+    if (!r.ok) return []
+    const data = (await r.json()) as { models: InstalledModel[] }
+    return data.models ?? []
+  } catch {
+    return []
   }
 }
 

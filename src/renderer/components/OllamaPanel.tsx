@@ -1,25 +1,47 @@
-import * as React from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import clsx from 'clsx'
-import { Download, Loader2, Play, RefreshCw, Trash2 } from 'lucide-react'
+import { Download, Loader2, Play, RefreshCw, Square, Trash2, AlertCircle, Activity } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import {
-  deleteOllamaModel,
   downloadOllama,
-  fetchOllamaCatalog,
-  fetchPresets,
-  fetchRuntimeRecommend,
-  pullOllamaPreset,
-  selectOllamaPreset,
-  startOllama,
   uninstallAppOllama,
+  selectOllamaPreset,
   type OllamaCatalog,
   type RuntimePreset
 } from '../lib/sidecar'
+import {
+  useOllamaCatalog,
+  usePullModel,
+  useDeleteModel,
+  useStartOllama,
+  useStopOllama,
+  useAllInstalledModels
+} from '../hooks/useOllamaQueries'
+import { useTaskStore } from '../stores/taskStore'
+import { notify } from '../lib/notify'
 import { Select, type SelectOption } from './Select'
+import { useQueryClient } from '@tanstack/react-query'
+
+// ── Helpers ──────────────────────────────────────────────────────
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`
   return `${(bytes / 1024).toFixed(0)} KB`
+}
+
+function formatSpeed(bps: number): string {
+  if (bps <= 0) return ''
+  if (bps >= 1_048_576) return `${(bps / 1_048_576).toFixed(1)} MB/s`
+  return `${(bps / 1024).toFixed(0)} KB/s`
+}
+
+function formatEta(seconds: number): string {
+  if (seconds <= 0 || !Number.isFinite(seconds)) return ''
+  if (seconds < 60) return `${Math.ceil(seconds)}s`
+  const m = Math.floor(seconds / 60)
+  const s = Math.ceil(seconds % 60)
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m ${s}s`
 }
 
 function catalogPresetRows(
@@ -38,59 +60,23 @@ function catalogPresetRows(
     }))
 }
 
-function operationMessage(catalog: OllamaCatalog | null, isZh: boolean): string | null {
-  const op = catalog?.operation
-  if (!op || op.state !== 'working') return null
-  const pctNum = op.progress?.percent
-  const pct =
-    typeof pctNum === 'number' ? ` ${pctNum}%` : ''
-  const detail = op.progress?.message || op.message
-  if (op.pulling_preset_id) {
-    const preset = catalog?.presets.find((p) => (p.preset_id ?? p.id) === op.pulling_preset_id)
-    const model = preset?.ollama_model ?? op.pulling_preset_id
-    const status = detail && detail !== 'preparing' ? ` · ${detail}` : ''
-    return isZh
-      ? `正在拉取 ${model}…${pct}${status}`
-      : `Pulling ${model}…${pct}${status}`
-  }
-  if (op.setup_running) {
-    return isZh ? `正在启动 Ollama…${pct} ${detail}` : `Starting Ollama…${pct} ${detail}`
-  }
-  return detail ? `${detail}${pct}` : null
+function healthColor(health?: string): string {
+  if (health === 'healthy') return 'bg-green-500'
+  if (health === 'unhealthy') return 'bg-yellow-500'
+  if (health === 'restarting') return 'bg-blue-400 animate-pulse'
+  if (health === 'error') return 'bg-red-500'
+  return 'bg-ink-400'
 }
 
-async function pollCatalog(
-  refresh: () => Promise<void>,
-  done: (catalog: OllamaCatalog | null) => boolean,
-  deadlineMs = 60 * 60 * 1000
-): Promise<{ ok: boolean; error?: string; catalog?: OllamaCatalog | null }> {
-  const deadline = Date.now() + deadlineMs
-  while (Date.now() < deadline) {
-    const data = await fetchOllamaCatalog()
-    if (data?.operation?.state === 'error') {
-      return { ok: false, error: data.operation.message || 'Operation failed', catalog: data }
-    }
-    if (done(data)) return { ok: true, catalog: data }
-    await new Promise((r) => setTimeout(r, 2000))
-    await refresh()
-  }
-  return { ok: false, error: 'Operation timed out' }
+function healthLabel(health: string | undefined, isZh: boolean): string {
+  if (health === 'healthy') return isZh ? '健康' : 'Healthy'
+  if (health === 'unhealthy') return isZh ? '异常' : 'Unhealthy'
+  if (health === 'restarting') return isZh ? '重启中' : 'Restarting'
+  if (health === 'error') return isZh ? '错误' : 'Error'
+  return ''
 }
 
-async function waitForAppBinary(
-  refresh: () => Promise<void>,
-  deadlineMs = 10 * 60 * 1000
-): Promise<{ ok: boolean; error?: string }> {
-  const result = await pollCatalog(
-    refresh,
-    (data) => Boolean(data?.app_binary_installed && !data.app_download_in_progress),
-    deadlineMs
-  )
-  if (!result.ok && result.catalog?.app_download_error) {
-    return { ok: false, error: result.catalog.app_download_error }
-  }
-  return { ok: result.ok, error: result.error }
-}
+// ── Component ────────────────────────────────────────────────────
 
 interface OllamaPanelProps {
   isZh: boolean
@@ -107,153 +93,99 @@ export function OllamaPanel({
   onPresetChange,
   onUseUserOllamaChange
 }: OllamaPanelProps): React.JSX.Element {
-  const [catalog, setCatalog] = React.useState<OllamaCatalog | null>(null)
-  const [fallbackPresets, setFallbackPresets] = React.useState<RuntimePreset[]>([])
-  const [recommendedId, setRecommendedId] = React.useState<string | null>(null)
-  const [catalogLoading, setCatalogLoading] = React.useState(true)
-  const [loading, setLoading] = React.useState(false)
-  const [pullingId, setPullingId] = React.useState<string | null>(null)
-  const [actionMsg, setActionMsg] = React.useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const [loading, setLoading] = useState(false)
+  const [actionMsg, setActionMsg] = useState<string | null>(null)
 
-  const refresh = React.useCallback(async () => {
-    const data = await fetchOllamaCatalog()
-    setCatalog(data)
-    setCatalogLoading(false)
-  }, [])
+  // TanStack Query hooks
+  const { data: catalogData, isLoading: catalogLoading } = useOllamaCatalog()
+  const catalog = catalogData ?? null
+  const { data: installedModels } = useAllInstalledModels()
+  const pullMutation = usePullModel()
+  const deleteMutation = useDeleteModel()
+  const startMutation = useStartOllama()
+  const stopMutation = useStopOllama()
 
-  React.useEffect(() => {
-    void refresh()
-    void fetchPresets().then((ps) => {
-      setFallbackPresets(ps)
-      setCatalogLoading(false)
-    })
-    void fetchRuntimeRecommend().then((r) => setRecommendedId(r?.recommended_preset_id ?? null))
-  }, [refresh])
+  // Task store for active pull tracking — select raw tasks, derive in useMemo
+  const tasks = useTaskStore(useShallow((s) => s.tasks))
+  const pullTask = useMemo(() => {
+    return Object.values(tasks).find((t) => t.type === 'pull' && (t.status === 'running' || t.status === 'queued'))
+  }, [tasks])
 
-  React.useEffect(() => {
-    const op = catalog?.operation
-    const busy =
-      Boolean(catalog?.app_download_in_progress) ||
-      op?.state === 'working' ||
-      Boolean(op?.pulling_preset_id) ||
-      Boolean(op?.setup_running)
-    if (!busy) return
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['ollama'] })
+  }, [queryClient])
 
-    const msg = operationMessage(catalog, isZh)
-    if (msg) setActionMsg(msg)
-    if (op?.pulling_preset_id) setPullingId(op.pulling_preset_id)
-
-    const id = window.setInterval(() => {
-      void refresh()
-    }, 2000)
-    return () => window.clearInterval(id)
-  }, [
-    catalog?.operation?.state,
-    catalog?.operation?.pulling_preset_id,
-    catalog?.operation?.progress?.percent,
-    catalog?.app_download_in_progress,
-    isZh,
-    refresh
-  ])
-
-  const presets = catalogPresetRows(catalog, fallbackPresets, catalog?.recommended_preset_id ?? recommendedId)
+  // Derived state
+  const presets = catalogPresetRows(catalog, [], catalog?.recommended_preset_id ?? null)
   const selectedId =
-    localPresetId ||
-    catalog?.selected_preset_id ||
-    catalog?.recommended_preset_id ||
-    recommendedId ||
-    ''
+    localPresetId || catalog?.selected_preset_id || catalog?.recommended_preset_id || ''
+  const op = catalog?.operation
+  const opBusy =
+    op?.state === 'working' || Boolean(op?.pulling_preset_id) || Boolean(op?.setup_running)
+  const downloading = loading || Boolean(catalog?.app_download_in_progress)
+  const showDownloadBtn = !catalog?.app_binary_installed && !catalog?.app_download_in_progress
 
-  const presetOptions: SelectOption[] = presets.map((p) => ({
-    value: p.preset_id ?? p.id,
-    label: isZh ? p.label_zh : p.label_en
-  }))
+  // Error state from operation
+  const opError = op?.state === 'error' ? op.message : null
 
-  const sourceLabel = (source: OllamaCatalog['source']): string => {
-    if (source === 'app') return isZh ? '应用内 Ollama' : 'App Ollama'
-    if (source === 'user') return isZh ? '系统 Ollama' : 'System Ollama'
-    return isZh ? '未连接' : 'Offline'
-  }
+  // Pull progress from task store (richer than catalog)
+  const pullProgress = pullTask
+    ? {
+        percent: pullTask.progress >= 0 ? pullTask.progress : undefined,
+        speed: pullTask.speedBps > 0 ? formatSpeed(pullTask.speedBps) : '',
+        eta: pullTask.etaSec > 0 ? formatEta(pullTask.etaSec) : '',
+        downloaded:
+          pullTask.totalBytes > 0
+            ? `${formatBytes(pullTask.completedBytes)} / ${formatBytes(pullTask.totalBytes)}`
+            : '',
+        label: pullTask.label
+      }
+    : null
+
+  // ── Handlers ─────────────────────────────────────────────────
 
   const handleSelectPreset = async (presetId: string): Promise<void> => {
     onPresetChange(presetId)
     await selectOllamaPreset(presetId)
-    void refresh()
+    refresh()
   }
 
-  const handlePull = async (preset: RuntimePreset): Promise<void> => {
+  const handlePull = (preset: RuntimePreset): void => {
     const id = preset.preset_id ?? preset.id
-    setPullingId(id)
-    setActionMsg(isZh ? `正在拉取 ${preset.ollama_model}…` : `Pulling ${preset.ollama_model}…`)
-    try {
-      const result = await pullOllamaPreset(id)
-      if (!result.ok) {
-        setActionMsg(result.error || (isZh ? '拉取失败' : 'Pull failed'))
-        setPullingId(null)
-        return
-      }
-      if (result.status === 'already_installed') {
-        onPresetChange(id)
-        setActionMsg(isZh ? '模型已就绪' : 'Model ready')
-        setPullingId(null)
-        void refresh()
-        return
-      }
-      onPresetChange(id)
-      const polled = await pollCatalog(
-        refresh,
-        (data) =>
-          Boolean(
-            data?.presets.find((p) => (p.preset_id ?? p.id) === id)?.installed
-          ),
-        2 * 60 * 60 * 1000
-      )
-      if (polled.ok) {
-        setActionMsg(isZh ? '模型已就绪' : 'Model ready')
-      } else {
-        setActionMsg(polled.error || (isZh ? '拉取失败' : 'Pull failed'))
-      }
-    } finally {
-      setPullingId(null)
-      void refresh()
-    }
+    onPresetChange(id)
+    pullMutation.mutate({ presetId: id, modelName: preset.ollama_model })
   }
 
-  const handleDelete = async (preset: RuntimePreset): Promise<void> => {
+  const handleDelete = (preset: RuntimePreset): void => {
     const name = preset.installed_name || preset.ollama_model
-    const ok = await deleteOllamaModel(name)
-    if (ok) void refresh()
+    deleteMutation.mutate(name)
   }
 
   const handleStart = async (): Promise<void> => {
     setLoading(true)
     setActionMsg(isZh ? '正在启动…' : 'Starting…')
     try {
-      const result = await startOllama(useUserOllama)
-      if (!result.ok) {
-        setActionMsg(result.error || (isZh ? '启动失败' : 'Start failed'))
-        return
-      }
-      if (result.status === 'ready' && result.base_url) {
-        setActionMsg(
-          `${isZh ? '已连接' : 'Connected'} · ${result.source === 'user' ? (isZh ? '系统' : 'system') : (isZh ? '应用内' : 'app')}`
-        )
-        void refresh()
-        return
-      }
-      const polled = await pollCatalog(refresh, (data) => Boolean(data?.running), 120_000)
-      if (polled.ok && polled.catalog?.running) {
-        const src = polled.catalog.source
-        setActionMsg(
-          `${isZh ? '已连接' : 'Connected'} · ${src === 'user' ? (isZh ? '系统' : 'system') : (isZh ? '应用内' : 'app')}`
-        )
-      } else {
-        setActionMsg(polled.error || (isZh ? '启动失败' : 'Start failed'))
-      }
-      void refresh()
+      startMutation.mutate(useUserOllama, {
+        onSuccess: (result) => {
+          setActionMsg(
+            result.ok
+              ? `${isZh ? '已连接' : 'Connected'} · ${result.source === 'user' ? (isZh ? '系统' : 'system') : (isZh ? '应用内' : 'app')}`
+              : result.error || (isZh ? '启动失败' : 'Start failed')
+          )
+        },
+        onError: (err) => {
+          setActionMsg(err.message || (isZh ? '启动失败' : 'Start failed'))
+        }
+      })
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleStop = (): void => {
+    stopMutation.mutate()
+    setActionMsg(isZh ? '已停止' : 'Stopped')
   }
 
   const handleDownloadBinary = async (): Promise<void> => {
@@ -265,22 +197,12 @@ export function OllamaPanel({
         setActionMsg(result.error || (isZh ? '下载失败' : 'Download failed'))
         return
       }
-
       if (result.status === 'already_installed') {
         setActionMsg(isZh ? 'Ollama 已在应用目录，正在启动…' : 'Ollama already installed, starting…')
-        await refresh()
         await handleStart()
         return
       }
-
-      const waited = await waitForAppBinary(refresh)
-      if (!waited.ok) {
-        setActionMsg(waited.error || (isZh ? '下载失败' : 'Download failed'))
-        return
-      }
-
       setActionMsg(isZh ? 'Ollama 已下载，正在启动…' : 'Ollama downloaded, starting…')
-      await refresh()
       await handleStart()
     } finally {
       setLoading(false)
@@ -293,25 +215,35 @@ export function OllamaPanel({
       const ok = await uninstallAppOllama()
       setActionMsg(
         ok
-          ? (isZh ? '已移除应用内 Ollama（系统 Ollama 不受影响）' : 'App Ollama removed (system install untouched)')
-          : (isZh ? '移除失败' : 'Remove failed')
+          ? isZh
+            ? '已移除应用内 Ollama（系统 Ollama 不受影响）'
+            : 'App Ollama removed (system install untouched)'
+          : isZh
+            ? '移除失败'
+            : 'Remove failed'
       )
-      void refresh()
+      refresh()
     } finally {
       setLoading(false)
     }
   }
 
-  const opBusy =
-    catalog?.operation?.state === 'working' ||
-    Boolean(catalog?.operation?.pulling_preset_id) ||
-    Boolean(catalog?.operation?.setup_running)
-  const downloading = loading || Boolean(catalog?.app_download_in_progress)
-  const showDownloadBtn = !catalog?.app_binary_installed && !catalog?.app_download_in_progress
-  const liveOpMsg = operationMessage(catalog, isZh)
+  // ── Labels ───────────────────────────────────────────────────
+
+  const sourceLabel = (source: OllamaCatalog['source']): string => {
+    if (source === 'app') return isZh ? '应用内 Ollama' : 'App Ollama'
+    if (source === 'user') return isZh ? '系统 Ollama' : 'System Ollama'
+    return isZh ? '未连接' : 'Offline'
+  }
+
+  const presetOptions: SelectOption[] = presets.map((p) => ({
+    value: p.preset_id ?? p.id,
+    label: `${p.recommended ? '★ ' : ''}${isZh ? p.label_zh : p.label_en}`
+  }))
 
   return (
     <div className="space-y-3 rounded-lg border border-[var(--divider)]">
+      {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--divider)] px-3 py-2.5">
         <div>
           <span className="text-[13px] font-semibold text-ink-800">
@@ -326,7 +258,7 @@ export function OllamaPanel({
         <button
           type="button"
           className="btn-ghost rounded p-1"
-          onClick={() => void refresh()}
+          onClick={refresh}
           title={isZh ? '刷新' : 'Refresh'}
         >
           <RefreshCw size={14} />
@@ -334,21 +266,32 @@ export function OllamaPanel({
       </div>
 
       <div className="space-y-3 px-3 pb-3">
+        {/* Status row */}
         <div className="flex flex-wrap items-center gap-2 text-[12px]">
           <span
             className={clsx(
               'inline-block h-2 w-2 rounded-full',
-              catalog?.running ? 'bg-green-500' : 'bg-ink-400'
+              catalog?.running
+                ? healthColor(catalog?.operation?.state === 'error' ? 'error' : 'healthy')
+                : 'bg-ink-400'
             )}
           />
           <span className="text-ink-700">{sourceLabel(catalog?.source ?? null)}</span>
           {catalog?.running && catalog.models_dir && (
             <span className="text-[10px] text-ink-500" style={{ fontFamily: 'var(--font-mono)' }}>
-              {catalog.source === 'app' ? catalog.models_dir : (isZh ? '系统模型目录' : 'system models dir')}
+              {catalog.source === 'app' ? catalog.models_dir : isZh ? '系统模型目录' : 'system models dir'}
+            </span>
+          )}
+          {/* Health indicator */}
+          {catalog?.running && op?.state === 'error' && (
+            <span className="flex items-center gap-1 text-[10px] text-[var(--color-danger)]">
+              <AlertCircle size={10} />
+              {healthLabel('error', isZh)}
             </span>
           )}
         </div>
 
+        {/* Prefer system checkbox */}
         <label className="flex items-center gap-2 text-[12px] text-ink-700">
           <input
             type="checkbox"
@@ -360,6 +303,7 @@ export function OllamaPanel({
             : 'Prefer system Ollama when running (catalog models still manageable)'}
         </label>
 
+        {/* Action buttons */}
         <div className="flex flex-wrap gap-2">
           {showDownloadBtn && (
             <button
@@ -383,6 +327,17 @@ export function OllamaPanel({
               {isZh ? '连接 / 启动' : 'Connect / Start'}
             </button>
           )}
+          {catalog?.running && (
+            <button
+              type="button"
+              className="settings-btn-secondary flex items-center gap-2"
+              disabled={opBusy}
+              onClick={handleStop}
+            >
+              <Square size={14} />
+              {isZh ? '停止' : 'Stop'}
+            </button>
+          )}
           {catalog?.app_binary_installed && (
             <button
               type="button"
@@ -396,27 +351,60 @@ export function OllamaPanel({
           )}
         </div>
 
-        {(actionMsg || liveOpMsg) && (
-          <div className="space-y-1.5">
-            <p className="text-[11px] text-ink-600">{actionMsg || liveOpMsg}</p>
-            {opBusy && typeof catalog?.operation?.progress?.percent === 'number' && (
-              <div className="h-1 overflow-hidden rounded-full bg-[var(--color-paper-deep)]">
+        {/* Error display */}
+        {opError && (
+          <div className="flex items-start gap-2 rounded-md bg-[var(--color-danger-soft)] px-3 py-2">
+            <AlertCircle size={14} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] text-[var(--color-danger)]">{opError}</p>
+              <button
+                type="button"
+                className="mt-1 text-[10px] text-[var(--color-accent)] hover:underline"
+                onClick={refresh}
+              >
+                {isZh ? '重试' : 'Retry'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Pull progress */}
+        {pullProgress && (
+          <div className="space-y-1.5 rounded-md bg-[var(--color-accent-soft)] px-3 py-2">
+            <div className="flex items-center gap-2 text-[11px]">
+              <Activity size={12} className="shrink-0 text-[var(--color-accent)]" />
+              <span className="truncate font-medium text-ink-800">{pullProgress.label}</span>
+            </div>
+            {typeof pullProgress.percent === 'number' && (
+              <div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-paper-deep)]">
                 <div
                   className="h-full rounded-full bg-[var(--color-accent)] transition-all duration-300"
-                  style={{
-                    width: `${Math.min(100, Math.max(2, catalog.operation.progress.percent))}%`
-                  }}
+                  style={{ width: `${Math.min(100, Math.max(2, pullProgress.percent))}%` }}
                 />
               </div>
             )}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-ink-600">
+              {typeof pullProgress.percent === 'number' && <span>{pullProgress.percent}%</span>}
+              {pullProgress.downloaded && <span>{pullProgress.downloaded}</span>}
+              {pullProgress.speed && <span>{pullProgress.speed}</span>}
+              {pullProgress.eta && <span>ETA {pullProgress.eta}</span>}
+            </div>
           </div>
         )}
-        {catalog?.app_download_in_progress && !actionMsg && !liveOpMsg && (
+
+        {/* Action message (non-error, non-pull) */}
+        {actionMsg && !opError && !pullProgress && (
+          <p className="text-[11px] text-ink-600">{actionMsg}</p>
+        )}
+
+        {/* Ollama download in progress */}
+        {catalog?.app_download_in_progress && !actionMsg && !pullProgress && (
           <p className="text-[11px] text-ink-600">
             {isZh ? '正在下载应用内 Ollama…' : 'Downloading app Ollama…'}
           </p>
         )}
 
+        {/* Preset selector */}
         {presets.length > 0 && (
           <div className="space-y-1.5">
             <span className="settings-field-label">
@@ -424,18 +412,16 @@ export function OllamaPanel({
             </span>
             <Select
               value={selectedId}
-              options={presetOptions.map((o) => ({
-                ...o,
-                label: `${presets.find((p) => (p.preset_id ?? p.id) === o.value)?.recommended ? '★ ' : ''}${o.label}`
-              }))}
+              options={presetOptions}
               onChange={(v) => void handleSelectPreset(v)}
             />
           </div>
         )}
 
+        {/* Model catalog */}
         <div className="space-y-1.5">
           <span className="settings-field-label">
-            {isZh ? '模型目录（仅 preset）' : 'Model catalog (presets only)'}
+            {isZh ? '模型目录' : 'Model catalog'}
           </span>
           <div className="max-h-64 space-y-1.5 overflow-y-auto">
             {catalogLoading && presets.length === 0 ? (
@@ -448,14 +434,13 @@ export function OllamaPanel({
               presets.map((preset) => {
                 const id = preset.preset_id ?? preset.id
                 const label = isZh ? preset.label_zh : preset.label_en
-                const pulling =
-                  pullingId === id ||
-                  catalog?.operation?.pulling_preset_id === id
+                const pullingThis =
+                  pullMutation.isPending && pullTask?.modelName === preset.ollama_model
                 return (
                   <div
                     key={id}
                     className={clsx(
-                      'rounded border px-2 py-2',
+                      'rounded border px-2 py-2 transition-colors',
                       preset.selected || id === selectedId
                         ? 'border-[var(--color-accent)] bg-[rgb(255_252_249/0.6)]'
                         : 'border-[var(--divider)]'
@@ -464,9 +449,13 @@ export function OllamaPanel({
                     <div className="flex items-start gap-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-[12px] font-medium text-ink-800">
-                          {preset.recommended ? '★ ' : ''}{label}
+                          {preset.recommended ? '★ ' : ''}
+                          {label}
                         </p>
-                        <p className="text-[10px] text-ink-500" style={{ fontFamily: 'var(--font-mono)' }}>
+                        <p
+                          className="text-[10px] text-ink-500"
+                          style={{ fontFamily: 'var(--font-mono)' }}
+                        >
                           {preset.ollama_model}
                           {' · '}
                           {preset.modalities.join(', ')}
@@ -489,20 +478,22 @@ export function OllamaPanel({
                           <button
                             type="button"
                             className="settings-btn-secondary px-2 py-1 text-[10px]"
-                            disabled={pulling || loading || opBusy}
-                            onClick={() => void handlePull(preset)}
+                            disabled={pullingThis || loading || opBusy}
+                            onClick={() => handlePull(preset)}
                           >
-                            {pulling ? (
+                            {pullingThis ? (
                               <Loader2 size={12} className="animate-spin" />
+                            ) : isZh ? (
+                              '拉取'
                             ) : (
-                              isZh ? '拉取' : 'Pull'
+                              'Pull'
                             )}
                           </button>
                         ) : (
                           <button
                             type="button"
                             className="btn-ghost rounded p-1 text-ink-500 hover:text-[var(--color-danger)]"
-                            onClick={() => void handleDelete(preset)}
+                            onClick={() => handleDelete(preset)}
                             title={isZh ? '删除模型' : 'Delete model'}
                           >
                             <Trash2 size={12} />

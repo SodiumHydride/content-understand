@@ -1,9 +1,10 @@
 import { useEffect } from 'react'
 import { Layout } from './components/Layout'
+import { Providers } from './providers'
 import { useAppStore } from './stores/appStore'
 import { checkHealth, autoDetectRuntime } from './lib/sidecar'
 
-export default function App(): React.JSX.Element {
+function AppInner(): React.JSX.Element {
   const applyLocale = useAppStore((s) => s.applyLocale)
   const syncAppPaths = useAppStore((s) => s.syncAppPaths)
   const pushEngineConfig = useAppStore((s) => s.pushEngineConfig)
@@ -24,7 +25,6 @@ export default function App(): React.JSX.Element {
         await pushEngineConfig()
         await refreshLibrary()
 
-        // Auto-detect local runtime if enabled and not cloud-only
         if (settings.autoStartLocal && settings.inferenceMode !== 'api_only') {
           void autoDetectRuntime({
             useUserOllama: settings.useOllamaIfAvailable,
@@ -46,4 +46,12 @@ export default function App(): React.JSX.Element {
   ])
 
   return <Layout />
+}
+
+export default function App(): React.JSX.Element {
+  return (
+    <Providers>
+      <AppInner />
+    </Providers>
+  )
 }

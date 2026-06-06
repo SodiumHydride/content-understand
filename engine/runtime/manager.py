@@ -62,6 +62,7 @@ class RuntimeManager:
         self._thread: threading.Thread | None = None
         self._pull_thread: threading.Thread | None = None
         self._pulling_preset_id: str | None = None
+        self._pull_start_ts: float = 0.0
         self._status_cache: dict[str, Any] | None = None
         self._status_cache_ts: float = 0
         self._status_cache_ttl: float = 15.0
@@ -161,6 +162,9 @@ class RuntimeManager:
             "progress": snap["progress"],
             "pulling_preset_id": pulling,
             "setup_running": setup_running,
+            "ollama_health": self._ollama_health,
+            "ollama_last_health_check": self._ollama_last_health_check,
+            "ollama_restart_count": self._ollama_restart_count,
         }
 
     # ── Per-modality routing ────────────────────────────────────────────────
@@ -613,6 +617,7 @@ class RuntimeManager:
 
         with self._lock:
             self._pulling_preset_id = preset_id
+            self._pull_start_ts = _time_mod.monotonic()
             self._set_state(
                 state="working",
                 message=f"pulling {model_name}",
@@ -634,11 +639,30 @@ class RuntimeManager:
         }
 
     def _pull_worker(self, preset_id: str) -> None:
-        def prog(stage: str, percent: int, message: str) -> None:
-            logger.info("Pull %s: [%s] %s%% %s", preset_id, stage, percent, message)
-            self._set_state(
-                progress={"stage": stage, "percent": percent, "message": message},
-            )
+        def prog(info: dict[str, Any] | str, percent: int = 0, message: str = "") -> None:
+            if isinstance(info, dict):
+                stage = info.get("stage", "pull")
+                pct = info.get("percent", 0)
+                msg = info.get("message", "")
+                logger.info("Pull %s: [%s] %s%% %s", preset_id, stage, pct, msg)
+                self._set_state(
+                    progress={
+                        "stage": stage,
+                        "percent": pct,
+                        "message": msg,
+                        "total_bytes": info.get("total_bytes", 0),
+                        "completed_bytes": info.get("completed_bytes", 0),
+                        "speed_bps": info.get("speed_bps", 0.0),
+                        "elapsed_sec": _time_mod.monotonic() - self._pull_start_ts
+                        if hasattr(self, "_pull_start_ts")
+                        else 0.0,
+                    },
+                )
+            else:
+                logger.info("Pull %s: [%s] %s%% %s", preset_id, info, percent, message)
+                self._set_state(
+                    progress={"stage": info, "percent": percent, "message": message},
+                )
 
         try:
             logger.info("Pull started: preset=%s", preset_id)
