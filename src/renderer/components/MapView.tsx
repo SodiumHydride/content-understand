@@ -1,8 +1,10 @@
 import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useQuery } from '@tanstack/react-query'
 import { Map, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
+import { fetchGraph } from '../lib/sidecar'
 import { MAP_NODE_H, MAP_NODE_W, type MapCanvasRect } from '../lib/mapCanvasBounds'
 import { mergeMapLayout } from '../lib/mapLayout'
 import {
@@ -29,6 +31,7 @@ import {
   ThinkingCanvasOptions,
   ThinkingCanvasToolbar
 } from './thinkingCanvas/ThinkingCanvasToolbar'
+import { WikiEdgeLayer } from './WikiEdgeLayer'
 
 type DragState = {
   kind: 'note'
@@ -90,12 +93,41 @@ export function MapView(): React.JSX.Element {
   const [isPanning, setIsPanning] = useState(false)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [highlightSlug, setHighlightSlug] = useState<string | null>(null)
 
   const noteSlugs = useMemo(() => library.map((i) => i.slug), [library])
   const layout = useMemo(
     () => mergeMapLayout(noteSlugs, mapMode === 'wiki' ? wikiMap : thinkingMap),
     [noteSlugs, mapMode, wikiMap, thinkingMap]
   )
+
+  const { data: graph } = useQuery({
+    queryKey: ['wiki-graph'],
+    queryFn: fetchGraph,
+    staleTime: 30_000,
+    enabled: mapMode === 'wiki'
+  })
+
+  const linkCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    if (!graph?.edges) return counts
+    for (const edge of graph.edges) {
+      counts[edge.source_slug] = (counts[edge.source_slug] ?? 0) + 1
+      counts[edge.target_slug] = (counts[edge.target_slug] ?? 0) + 1
+    }
+    return counts
+  }, [graph?.edges])
+
+  const connectedSlugs = useMemo(() => {
+    const set = new Set<string>()
+    if (!highlightSlug || !graph?.edges) return set
+    set.add(highlightSlug)
+    for (const edge of graph.edges) {
+      if (edge.source_slug === highlightSlug) set.add(edge.target_slug)
+      if (edge.target_slug === highlightSlug) set.add(edge.source_slug)
+    }
+    return set
+  }, [highlightSlug, graph?.edges])
 
   const clientToWorld = useCallback(
     (clientX: number, clientY: number) => {
@@ -548,6 +580,9 @@ export function MapView(): React.JSX.Element {
           )}
           <div className="map-world" style={{ transform: cameraTransform(camera) }}>
             <div className="map-canvas">
+              {mapMode === 'wiki' && (
+                <WikiEdgeLayer layout={layout} highlightSlug={highlightSlug} />
+              )}
               {mapMode === 'thinking' && thinkingCanvas && (
                 <ThinkingCanvasLayer
                   document={thinkingCanvas}
@@ -570,16 +605,23 @@ export function MapView(): React.JSX.Element {
                 const type = normalizeShelfType(String(item.type)) as ShelfType
                 const accent = TYPE_STYLES[type].accent
                 const searchDim = searchActive && !libraryItemMatchesQuery(item, libraryQuery)
+                const nodeDim =
+                  highlightSlug !== null && mapMode === 'wiki' && !connectedSlugs.has(item.slug)
+                const linkCount = linkCounts[item.slug] ?? 0
+                const nodeScale = 1 + Math.min(linkCount, 5) * 0.03
                 return (
                   <div
                     key={item.slug}
                     className={clsx(
                       'map-node',
                       selectedSlug === item.slug && 'map-node-selected',
-                      searchDim && 'map-node-search-dim'
+                      searchDim && 'map-node-search-dim',
+                      nodeDim && 'map-node-dim'
                     )}
-                    style={{ left: pos.x, top: pos.y }}
+                    style={{ left: pos.x, top: pos.y, transform: `scale(${nodeScale})` }}
                     onPointerDown={(e) => startNoteDrag(e, item.slug, pos.x, pos.y)}
+                    onPointerEnter={() => setHighlightSlug(item.slug)}
+                    onPointerLeave={() => setHighlightSlug(null)}
                     onClick={(e) => {
                       e.stopPropagation()
                       if (mapMode === 'thinking' && tool !== 'select') return

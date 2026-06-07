@@ -2292,7 +2292,14 @@ html[data-locale='en'] {
   cursor: grab;
   touch-action: none;
   user-select: none;
-  transition: box-shadow var(--duration) var(--ease-out);
+  transition:
+    box-shadow var(--duration) var(--ease-out),
+    opacity 0.2s ease;
+  transform-origin: center center;
+}
+
+.map-node-dim {
+  opacity: 0.15;
 }
 
 .map-node:active {
@@ -2735,6 +2742,19 @@ html[data-locale='en'] {
     width: 100%;
     border-left: none;
   }
+}
+
+/* ─── Wiki edge layer ─── */
+.wiki-edge-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.wiki-edge-layer path {
+  transition: opacity 0.2s ease, stroke-width 0.2s ease;
 }
 
 /* ─── Wikilinks ─── */
