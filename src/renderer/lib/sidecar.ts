@@ -653,6 +653,21 @@ export interface GraphEdge {
   context: string | null
 }
 
+export async function createLink(sourceSlug: string, targetSlug: string): Promise<boolean> {
+  const base = await getBase()
+  if (!base) return false
+  try {
+    const r = await fetch(`${base}/v1/links/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_slug: sourceSlug, target_slug: targetSlug })
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
 export async function fetchGraph(): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
   const base = await getBase()
   if (!base) return { nodes: [], edges: [] }

@@ -130,8 +130,11 @@
       "unpinNote": "Unpin position",
       "wikiCanvasLabel": "Wiki graph",
       "editLinks": "Edit links for this note",
-      "linkNotes": "Connect to another note…"
+      "linkNotes": "Link to...",
+      "linkCreated": "Link created"
     },
+    "linkingHint": "Click a note to create link (Esc to cancel)",
+    "linkCreated": "Link created",
     "empty": "Map is empty",
     "emptyHint": "Add notes in Capture, then arrange them here",
     "emptyDetail": {
@@ -173,7 +176,14 @@
     "noMatchHint": "Try another keyword or clear filters"
   },
   "note": {
-    "backlinks": "Backlinks"
+    "backlinks": "Backlinks",
+    "copyWikilink": "Copy wikilink",
+    "wikilinkCopied": "Copied [[{{title}}]]"
+  },
+  "search": {
+    "wikilinkTitle": "Search note links",
+    "wikilinkPlaceholder": "Type a note title…",
+    "wikilinkHint": "Enter to copy · Esc to close"
   },
   "preview": {
     "pin": "Pin to wall",

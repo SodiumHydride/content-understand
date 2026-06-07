@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import {
@@ -5,12 +6,14 @@ import {
   BookMarked,
   FolderOpen,
   Inbox,
+  Link,
   Map,
   Search,
   Settings,
   Sparkles
 } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
+import { WikilinkSearch } from './WikilinkSearch'
 import type { ViewMode } from '../stores/types'
 import type { AppLocale } from '../lib/i18n'
 
@@ -23,6 +26,7 @@ const MODES: { id: ViewMode; icon: typeof Inbox }[] = [
 
 export function AppChrome(): React.JSX.Element {
   const { t, i18n } = useTranslation()
+  const [wlSearchOpen, setWlSearchOpen] = useState(false)
   const viewMode = useAppStore((s) => s.viewMode)
   const setViewMode = useAppStore((s) => s.setViewMode)
   const libraryQuery = useAppStore((s) => s.libraryQuery)
@@ -55,7 +59,20 @@ export function AppChrome(): React.JSX.Element {
     if (settings.vaultPath) void window.api.openPath(settings.vaultPath)
   }
 
+  // Cmd+L opens wikilink search
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
+        e.preventDefault()
+        setWlSearchOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   return (
+    <>
     <header className="app-chrome no-drag">
       <div className="chrome-row">
         <div className="chrome-brand">
@@ -124,6 +141,16 @@ export function AppChrome(): React.JSX.Element {
 
           <button
             type="button"
+            onClick={() => setWlSearchOpen(true)}
+            className="btn-ghost"
+            aria-label={t('search.wikilinkTitle')}
+            title={t('search.wikilinkTitle') + ' (⌘L)'}
+          >
+            <Link size={15} />
+          </button>
+
+          <button
+            type="button"
             onClick={() => setSettingsOpen(true)}
             className="btn-ghost"
             aria-label={t('nav.settings')}
@@ -146,5 +173,7 @@ export function AppChrome(): React.JSX.Element {
         </div>
       )}
     </header>
+    <WikilinkSearch open={wlSearchOpen} onClose={() => setWlSearchOpen(false)} />
+    </>
   )
 }

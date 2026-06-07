@@ -1,10 +1,10 @@
 import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { LayoutGrid, Map, Network, Pin, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
-import { fetchGraph } from '../lib/sidecar'
+import { createLink, fetchGraph } from '../lib/sidecar'
 import { animateForceLayout, type ForceEdge } from '../lib/forceLayout'
 import { MAP_NODE_H, MAP_NODE_W, type MapCanvasRect } from '../lib/mapCanvasBounds'
 import { mergeMapLayout } from '../lib/mapLayout'
@@ -94,11 +94,14 @@ export function MapView(): React.JSX.Element {
     wiki: false
   })
 
+  const queryClient = useQueryClient()
+
   const [camera, setCamera] = useState<MapCamera>({ x: 0, y: 0, z: 1 })
   const [isPanning, setIsPanning] = useState(false)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [highlightSlug, setHighlightSlug] = useState<string | null>(null)
+  const [linkingFrom, setLinkingFrom] = useState<string | null>(null)
 
   const noteSlugs = useMemo(() => library.map((i) => i.slug), [library])
   const layout = useMemo(
@@ -375,6 +378,11 @@ export function MapView(): React.JSX.Element {
   }
 
   const onCanvasClick = () => {
+    // Cancel linking mode on canvas click
+    if (linkingFrom) {
+      setLinkingFrom(null)
+      return
+    }
     if (!canvasInput.handleCanvasClick()) return
     selectItem(null)
   }
@@ -486,6 +494,11 @@ export function MapView(): React.JSX.Element {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key.toLowerCase() !== 'escape') return
+      if (linkingFrom) {
+        e.preventDefault()
+        setLinkingFrom(null)
+        return
+      }
       if (readerOpen) {
         e.preventDefault()
         closeReader()
@@ -498,7 +511,7 @@ export function MapView(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [viewMode, readerOpen, selectedSlug, closeReader, selectItem])
+  }, [viewMode, readerOpen, selectedSlug, closeReader, selectItem, linkingFrom])
 
   const menuItems = useMemo((): ContextMenuEntry[] => {
     if (!menu) return []
@@ -536,6 +549,13 @@ export function MapView(): React.JSX.Element {
       if (mapMode === 'wiki') {
         items.push({
           kind: 'item',
+          label: t('map.menu.linkNotes'),
+          onSelect: () => setLinkingFrom(slug)
+        })
+      }
+      if (mapMode === 'wiki') {
+        items.push({
+          kind: 'item',
           label: isWikiPinned ? t('map.menu.unpinNote') : t('map.menu.pinNote'),
           onSelect: () => toggleWikiPin(slug)
         })
@@ -549,8 +569,11 @@ export function MapView(): React.JSX.Element {
         {
           kind: 'item',
           label: t('map.menu.linkNotes'),
-          disabled: true,
-          onSelect: () => undefined
+          onSelect: () => {
+            // If right-clicking on a note, use that as source; otherwise use selectedSlug
+            const source = menu.slug ?? selectedSlug
+            if (source) setLinkingFrom(source)
+          }
         }
       ]
     }
@@ -569,7 +592,7 @@ export function MapView(): React.JSX.Element {
         }
       }
     ]
-  }, [menu, mapMode, t, selectItem, canvasInput, patchThinkingCanvas, thinkingToolPrefs.text, wikiPinnedSlugs, toggleWikiPin])
+  }, [menu, mapMode, t, selectItem, canvasInput, patchThinkingCanvas, thinkingToolPrefs.text, wikiPinnedSlugs, toggleWikiPin, selectedSlug])
 
   const peekItem = useMemo(
     () => (selectedSlug ? library.find((i) => i.slug === selectedSlug) : undefined),
@@ -658,6 +681,7 @@ export function MapView(): React.JSX.Element {
             'map-viewport',
             mapMode === 'wiki' ? 'map-viewport-wiki' : 'map-viewport-thinking',
             isPanning && 'map-viewport-panning',
+            linkingFrom && 'map-viewport-linking',
             tool === 'pen' && 'map-viewport-pen',
             tool === 'highlighter' && 'map-viewport-highlighter',
             tool === 'text' && 'map-viewport-text',
@@ -672,6 +696,11 @@ export function MapView(): React.JSX.Element {
           onClick={onCanvasClick}
           onContextMenu={openCanvasMenu}
         >
+          {linkingFrom && (
+            <div className="map-linking-hint">
+              {t('map.linkingHint')}
+            </div>
+          )}
           <p className="map-viewport-nav" aria-hidden>
             {mapMode === 'thinking' ? t('map.canvasNavThinking') : t('map.canvasNav')}
           </p>
@@ -716,6 +745,8 @@ export function MapView(): React.JSX.Element {
                   highlightSlug !== null && mapMode === 'wiki' && !connectedSlugs.has(item.slug)
                 const linkCount = linkCounts[item.slug] ?? 0
                 const nodeScale = 1 + Math.min(linkCount, 5) * 0.03
+                const isLinkSource = linkingFrom === item.slug
+                const isLinkTarget = linkingFrom !== null && linkingFrom !== item.slug
                 return (
                   <div
                     key={item.slug}
@@ -723,18 +754,39 @@ export function MapView(): React.JSX.Element {
                       'map-node',
                       selectedSlug === item.slug && 'map-node-selected',
                       searchDim && 'map-node-search-dim',
-                      nodeDim && 'map-node-dim'
+                      nodeDim && 'map-node-dim',
+                      isLinkSource && 'map-node-link-source',
+                      isLinkTarget && 'map-node-link-target'
                     )}
                     style={{ left: pos.x, top: pos.y, transform: `scale(${nodeScale})` }}
-                    onPointerDown={(e) => startNoteDrag(e, item.slug, pos.x, pos.y)}
+                    onPointerDown={(e) => {
+                      if (linkingFrom) return
+                      startNoteDrag(e, item.slug, pos.x, pos.y)
+                    }}
                     onPointerEnter={() => setHighlightSlug(item.slug)}
                     onPointerLeave={() => setHighlightSlug(null)}
                     onClick={(e) => {
                       e.stopPropagation()
+                      // Linking mode: clicking a target creates the link
+                      if (linkingFrom && linkingFrom !== item.slug) {
+                        void createLink(linkingFrom, item.slug).then((ok) => {
+                          if (ok) {
+                            void queryClient.invalidateQueries({ queryKey: ['wiki-graph'] })
+                          }
+                        })
+                        setLinkingFrom(null)
+                        return
+                      }
+                      // Linking mode: clicking source again cancels
+                      if (linkingFrom === item.slug) {
+                        setLinkingFrom(null)
+                        return
+                      }
                       if (mapMode === 'thinking' && tool !== 'select') return
                       selectItem(item.slug, { reader: false })
                     }}
                     onDoubleClick={(e) => {
+                      if (linkingFrom) return
                       e.preventDefault()
                       e.stopPropagation()
                       selectItem(item.slug, { reader: true })

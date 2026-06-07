@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQuery } from '@tanstack/react-query'
-import { Download, ExternalLink, FolderOpen, Pin, X } from 'lucide-react'
+import { Download, ExternalLink, FolderOpen, Link, Pin, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { fetchPage, fetchBacklinks } from '../lib/sidecar'
 import { splitTextWithWikilinks, resolveWikilinkTarget } from '../lib/wikilink'
@@ -16,6 +16,7 @@ import {
 } from '../lib/contentMeta'
 import type { ReaderPresentation } from '../lib/readerPresentation'
 import { getReaderPresentation } from '../lib/readerPresentation'
+import { notify } from '../lib/notify'
 import type { LibraryItem } from '../stores/types'
 
 function WikilinkText({ text, onNavigate }: { text: string; onNavigate: (slug: string) => void }) {
@@ -244,6 +245,18 @@ export function NotePreview({
             >
               <Download size={13} />
               {t('preview.exportMd')}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(`[[${detail.title}]]`)
+                notify(t('note.wikilinkCopied', { title: detail.title }), { type: 'success', duration: 2000 })
+              }}
+              className="btn-ghost"
+              title={t('note.copyWikilink')}
+            >
+              <Link size={13} />
+              {t('note.copyWikilink')}
             </button>
             {detail.url && (
               <a href={detail.url} target="_blank" rel="noreferrer" className="btn-ghost">

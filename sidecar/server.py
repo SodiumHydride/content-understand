@@ -931,6 +931,53 @@ def get_backlinks(slug: str):
         conn.close()
 
 
+class CreateLinkPayload(BaseModel):
+    source_slug: str
+    target_slug: str
+
+
+@app.post("/v1/links/create")
+def create_link(body: CreateLinkPayload):
+    from engine.index.db import open_db, upsert_link
+    from engine.paths import vault_dir
+
+    vp = vault_dir()
+    db_path = vp / ".content-app" / "index.db"
+    if not db_path.exists():
+        raise HTTPException(404, "Index not found")
+
+    conn = open_db(str(db_path))
+    try:
+        # Get target title for wikilink context
+        row = conn.execute(
+            "SELECT title FROM pages WHERE slug=?", (body.target_slug,)
+        ).fetchone()
+        target_title = row[0] if row else body.target_slug
+
+        upsert_link(conn, body.source_slug, body.target_slug, f"[[{target_title}]]")
+        conn.commit()
+
+        # Also append wikilink to source markdown file
+        _append_wikilink_to_file(vp, body.source_slug, target_title)
+
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+def _append_wikilink_to_file(vp: Path, source_slug: str, target_title: str) -> None:
+    """Append a wikilink to the source note's markdown file."""
+    md_path = (vp / f"{source_slug}.md").resolve()
+    if not md_path.is_relative_to(vp.resolve()):
+        return  # Safety: block directory traversal
+    if not md_path.exists():
+        return
+
+    wikilink = f"\n\n[[{target_title}]]\n"
+    with md_path.open("a", encoding="utf-8") as f:
+        f.write(wikilink)
+
+
 @app.get("/v1/links/graph")
 def get_graph():
     from engine.index.db import get_all_links, open_db
