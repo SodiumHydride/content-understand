@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -45,5 +48,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: content-understand-${{ matrix.platform }}
-          path: dist/*
+          path: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.zip
           retention-days: 30
