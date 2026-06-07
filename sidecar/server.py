@@ -28,6 +28,22 @@ from engine.config_bridge import settings_to_config
 from engine.index.db import list_pages, open_db
 from engine.index.rebuild import rebuild_from_vault, upsert_single_file
 from engine.paths import app_data_root, ensure_app_dirs, vault_dir
+
+
+def _inject_bundled_ffmpeg():
+    """Add bundled ffmpeg to PATH if available and system ffmpeg is missing."""
+    import shutil
+    if shutil.which("ffmpeg"):
+        return  # System ffmpeg available
+    try:
+        from engine.runtime.ffmpeg_manager import find_bundled_ffmpeg
+        bundled = find_bundled_ffmpeg(app_data_root())
+        if bundled:
+            ffmpeg_bin_dir = str(Path(bundled).parent)
+            os.environ["PATH"] = ffmpeg_bin_dir + os.pathsep + os.environ.get("PATH", "")
+            logger.info("Injected bundled ffmpeg: %s", ffmpeg_bin_dir)
+    except Exception:
+        pass
 from engine.runtime.hardware import probe_hardware
 from engine.runtime.manager import get_runtime_manager
 from engine.runtime.port_utils import (
@@ -171,7 +187,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Content Understand Sidecar", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^(file://|app://|https?://(localhost|127\.0\.0\.1)(:\d+)?$)",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -411,9 +427,18 @@ def runtime_setup(body: RuntimeSetupPayload):
     return {"ok": True, "state": rt.state}
 
 
-@app.get("/v1/providers/models")
-def provider_models(provider: str, base_url: str = "", api_key: str = ""):
+class ProviderModelsRequest(BaseModel):
+    provider: str
+    base_url: str = ""
+    api_key: str = ""
+
+
+@app.post("/v1/providers/models")
+def provider_models(body: ProviderModelsRequest):
     """Fetch available models from a provider's API."""
+    provider = body.provider
+    base_url = body.base_url
+    api_key = body.api_key
     if provider == "mimo":
         if not base_url:
             base_url = "https://api.xiaomimimo.com/v1"
@@ -436,18 +461,25 @@ def provider_models(provider: str, base_url: str = "", api_key: str = ""):
 
 def _fetch_openai_models(base_url: str, api_key: str) -> list[str]:
     """Fetch model list from an OpenAI-compatible /v1/models endpoint."""
-    import requests
+    import requests as req_lib
+
+    from content_understand.resolvers._ssrf import validate_url_not_ssrf
 
     try:
+        validate_url_not_ssrf(base_url)
         base = base_url.rstrip("/")
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        r = requests.get(f"{base}/models", headers=headers, timeout=10)
+        r = req_lib.get(f"{base}/models", headers=headers, timeout=10)
         if r.status_code != 200:
             return []
         data = r.json()
         models = data.get("data", [])
         return sorted([m["id"] for m in models if "id" in m])
+    except req_lib.ConnectionError:
+        logger.warning("Cannot connect to %s", base_url)
+        raise HTTPException(502, f"Cannot connect to {base_url}") from None
     except Exception:
+        logger.warning("Failed to fetch models from %s", base_url, exc_info=True)
         return []
 
 
@@ -981,6 +1013,7 @@ def main():
 
     # 1. Prepare app directories
     ensure_app_dirs()
+    _inject_bundled_ffmpeg()
     if not _ensure_pid_dir():
         logger.warning("PID file directory unavailable — PID management disabled")
 

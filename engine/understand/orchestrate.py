@@ -34,6 +34,13 @@ def _ensure_local_ready(
         get_shared_daemon,
     )
 
+    # Ensure ffmpeg is available for video/audio processing
+    try:
+        from engine.runtime.ffmpeg_manager import ensure_ffmpeg
+        ensure_ffmpeg(app_data_root(), on_progress)
+    except Exception as e:
+        logger.warning("ffmpeg setup failed (video processing may be limited): %s", e)
+
     rt = get_runtime_manager()
     rt.set_prefer_user_ollama(prefer_user)
 
