@@ -90,6 +90,23 @@ function sleep(ms: number): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function resolveSidecarCommand(): { cmd: string; args: string[]; cwd: string } | null {
+  // 1. Packaged mode: use bundled PyInstaller binary
+  if (!is.dev) {
+    const resourcesPath = process.resourcesPath
+    const sidecarBin = process.platform === 'win32'
+      ? join(resourcesPath, 'sidecar', 'sidecar.exe')
+      : join(resourcesPath, 'sidecar', 'sidecar')
+    if (existsSync(sidecarBin)) {
+      return {
+        cmd: sidecarBin,
+        args: ['--port', String(SIDECAR_PORT)],
+        cwd: join(resourcesPath, 'sidecar')
+      }
+    }
+    console.warn('[main] packaged mode but sidecar binary not found at', sidecarBin)
+  }
+
+  // 2. Dev mode: use Python interpreter
   const root = join(__dirname, '../..')
   const serverPy = join(root, 'sidecar', 'server.py')
   if (!existsSync(serverPy)) return null
@@ -208,7 +225,7 @@ function createWindow(): void {
     backgroundColor: '#FFFCF9',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false
     }

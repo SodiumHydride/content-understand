@@ -5,6 +5,8 @@ node_modules/
 out/
 dist/
 release/
+sidecar-dist/
+build/
 
 # Vite / tooling cache
 .vite/
