@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from content_understand.resolvers._ssrf import validate_url_not_ssrf
 from content_understand.resolvers.base import Resolver, ResolveResult
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,8 @@ class DirectURLResolver(Resolver):
         cache_dir = ctx.get("cache_dir") or f"{_tf.gettempdir()}/content_understand_cache"
 
         os.makedirs(cache_dir, exist_ok=True)
+
+        validate_url_not_ssrf(input)
 
         r = requests.get(
             input,

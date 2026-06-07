@@ -10,6 +10,7 @@ function AppInner(): React.JSX.Element {
   const pushEngineConfig = useAppStore((s) => s.pushEngineConfig)
   const refreshLibrary = useAppStore((s) => s.refreshLibrary)
   const setSidecarOnline = useAppStore((s) => s.setSidecarOnline)
+  const startHealthPolling = useAppStore((s) => s.startHealthPolling)
   const settings = useAppStore((s) => s.settings)
 
   useEffect(() => {
@@ -17,12 +18,17 @@ function AppInner(): React.JSX.Element {
   }, [applyLocale])
 
   useEffect(() => {
+    const controller = new AbortController()
     void (async () => {
       await syncAppPaths()
+      if (controller.signal.aborted) return
       const ok = await checkHealth()
+      if (controller.signal.aborted) return
       setSidecarOnline(ok)
       if (ok) {
+        startHealthPolling()
         await pushEngineConfig()
+        if (controller.signal.aborted) return
         await refreshLibrary()
 
         if (settings.autoStartLocal && settings.inferenceMode !== 'api_only') {
@@ -35,9 +41,11 @@ function AppInner(): React.JSX.Element {
         }
       }
     })()
+    return () => { controller.abort() }
   }, [
     refreshLibrary,
     setSidecarOnline,
+    startHealthPolling,
     syncAppPaths,
     pushEngineConfig,
     settings.autoStartLocal,

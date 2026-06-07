@@ -65,6 +65,10 @@ class ContentBundle:
     audio_base64: str | None = None
     video_base64: str | None = None
 
+    # Enhanced video understanding materials
+    frame_timestamps: list = field(default_factory=list)  # list[FrameTimestamp]
+    audio_chunks: list = field(default_factory=list)  # list[AudioChunk]
+
     # Metadata
     metadata: dict[str, Any] = field(default_factory=dict)
     content_type: str = ""  # "video", "image", "audio", "article"

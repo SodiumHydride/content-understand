@@ -35,6 +35,7 @@ export function NotePreview({
   const [detail, setDetail] = useState<LibraryItem | null>(null)
 
   useEffect(() => {
+    let cancelled = false
     if (!selectedSlug) {
       setDetail(null)
       return
@@ -45,8 +46,9 @@ export function NotePreview({
       return
     }
     void fetchPage(selectedSlug).then((page) => {
-      setDetail(page ?? local ?? null)
+      if (!cancelled) setDetail(page ?? local ?? null)
     })
+    return () => { cancelled = true }
   }, [selectedSlug, library])
 
   const dismissReader = (): void => {
@@ -66,6 +68,50 @@ export function NotePreview({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [presentation, selectedSlug, closeReader])
+
+  // Focus trap for center/overlay presentations
+  useEffect(() => {
+    if ((presentation !== 'center' && presentation !== 'overlay') || !selectedSlug) return
+    const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return
+      const dialog = presentation === 'center'
+        ? document.querySelector('.note-reader-overlay-panel')
+        : document.querySelector('[role="dialog"][aria-modal="true"]')
+      if (!dialog) return
+      const elements = (Array.from(dialog.querySelectorAll(FOCUSABLE)) as HTMLElement[])
+        .filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
+      if (elements.length === 0) return
+      const first = elements[0]
+      const last = elements[elements.length - 1]
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    // Focus the first element after portal renders
+    const timer = setTimeout(() => {
+      const dialog = presentation === 'center'
+        ? document.querySelector('.note-reader-overlay-panel')
+        : document.querySelector('[role="dialog"][aria-modal="true"]')
+      if (!dialog) return
+      const elements = (Array.from(dialog.querySelectorAll(FOCUSABLE)) as HTMLElement[])
+        .filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
+      if (elements.length > 0) elements[0].focus()
+    }, 0)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('keydown', handler)
+    }
+  }, [presentation, selectedSlug])
 
   if (!selectedSlug) return null
 

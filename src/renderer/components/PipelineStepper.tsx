@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import type { TaskStage, UnderstandTask } from '../stores/types'
+import { useAppStore } from '../stores/appStore'
 
 const STAGES: TaskStage[] = ['resolve', 'download', 'model', 'write']
 
@@ -13,6 +15,15 @@ const STAGE_INDEX: Record<TaskStage, number> = {
 
 export function PipelineStepper({ task }: { task: UnderstandTask }): React.JSX.Element {
   const { t } = useTranslation()
+  const removeTask = useAppStore((s) => s.removeTask)
+
+  // Auto-dismiss failed/completed tasks after 15 seconds
+  useEffect(() => {
+    if (task.status === 'failed' || task.status === 'completed') {
+      const timer = setTimeout(() => removeTask(task.id), 15_000)
+      return () => clearTimeout(timer)
+    }
+  }, [task.status, task.id, removeTask])
   const current = task.progress?.stage ?? 'resolve'
   const currentIdx = STAGE_INDEX[current]
   const pct = task.progress?.percent ?? 0

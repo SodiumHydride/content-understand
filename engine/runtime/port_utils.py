@@ -33,8 +33,10 @@ def find_process_on_port(port: int) -> int | None:
                     if local.endswith(f":{port}"):
                         return int(parts[4])
         else:
+            # -sTCP:LISTEN ensures we only get the process LISTENING on the port,
+            # not processes with established connections TO the port
             result = subprocess.run(
-                ["lsof", "-i", f":{port}", "-t"],
+                ["lsof", "-i", f":{port}", "-sTCP:LISTEN", "-t"],
                 capture_output=True,
                 text=True,
                 timeout=5,

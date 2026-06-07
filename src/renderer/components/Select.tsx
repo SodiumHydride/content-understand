@@ -29,6 +29,7 @@ export function Select({
   compact
 }: SelectProps): React.JSX.Element {
   const [open, setOpen] = React.useState(false)
+  const [highlightedIndex, setHighlightedIndex] = React.useState(-1)
   const ref = React.useRef<HTMLDivElement>(null)
 
   // Group options by `group` field
@@ -53,14 +54,47 @@ export function Select({
     return () => document.removeEventListener('mousedown', handle)
   }, [open])
 
+  // When dropdown opens, set highlightedIndex to the currently selected option
+  React.useEffect(() => {
+    if (!open) {
+      setHighlightedIndex(-1)
+      return
+    }
+    const idx = options.findIndex((o) => o.value === value)
+    setHighlightedIndex(idx >= 0 ? idx : 0)
+  }, [open, value, options])
+
   React.useEffect(() => {
     if (!open) return
     const handle = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key === 'Escape') {
+        setOpen(false)
+        return
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setHighlightedIndex((i) => Math.min(i + 1, options.length - 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setHighlightedIndex((i) => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        setHighlightedIndex((i) => {
+          if (i >= 0 && !options[i]?.disabled) {
+            onChange(options[i].value)
+            setOpen(false)
+          }
+          return i
+        })
+      }
     }
     document.addEventListener('keydown', handle)
     return () => document.removeEventListener('keydown', handle)
-  }, [open])
+  }, [open, options, onChange])
 
   return (
     <div ref={ref} className={clsx('relative', className)}>
@@ -68,6 +102,11 @@ export function Select({
         type="button"
         disabled={disabled}
         onClick={() => setOpen(!open)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-activedescendant={
+          open && highlightedIndex >= 0 ? `select-opt-${options[highlightedIndex]?.value}` : undefined
+        }
         className={clsx(
           'settings-input flex w-full items-center justify-between gap-2 text-left',
           compact && 'py-[0.35rem] text-[12px]',
@@ -101,29 +140,35 @@ export function Select({
                   {group}
                 </div>
               )}
-              {opts.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  role="option"
-                  aria-selected={opt.value === value}
-                  disabled={opt.disabled}
-                  onClick={() => {
-                    onChange(opt.value)
-                    setOpen(false)
-                  }}
-                  className={clsx(
-                    'flex w-full items-center px-3 text-left transition-colors',
-                    compact ? 'py-1 text-[12px]' : 'py-1.5 text-[var(--text-caption)]',
-                    opt.value === value
-                      ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
-                      : 'text-ink-800 hover:bg-[var(--color-shelf)]',
-                    opt.disabled && 'cursor-not-allowed opacity-40'
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
+              {opts.map((opt) => {
+                // Compute global index for highlightedIndex comparison
+                const globalIdx = options.indexOf(opt)
+                return (
+                  <button
+                    key={opt.value}
+                    id={`select-opt-${opt.value}`}
+                    type="button"
+                    role="option"
+                    aria-selected={opt.value === value}
+                    disabled={opt.disabled}
+                    onClick={() => {
+                      onChange(opt.value)
+                      setOpen(false)
+                    }}
+                    className={clsx(
+                      'flex w-full items-center px-3 text-left transition-colors',
+                      compact ? 'py-1 text-[12px]' : 'py-1.5 text-[var(--text-caption)]',
+                      opt.value === value
+                        ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                        : 'text-ink-800 hover:bg-[var(--color-shelf)]',
+                      globalIdx === highlightedIndex && opt.value !== value && 'bg-[var(--color-shelf)]',
+                      opt.disabled && 'cursor-not-allowed opacity-40'
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
             </div>
           ))}
         </div>

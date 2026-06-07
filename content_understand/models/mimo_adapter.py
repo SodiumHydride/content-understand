@@ -81,10 +81,8 @@ class MimoAdapter(ContentModel):
         output_format: str = "text",
         json_schema: dict | None = None,
     ) -> str | dict:
-        self._output_format = output_format
-        self._json_schema = json_schema
         if bundle.content_type == "video":
-            return self._understand_video(bundle, prompt, timeout, language, frame_config)
+            return self._understand_video(bundle, prompt, timeout, language, frame_config, output_format, json_schema)
         elif bundle.content_type == "audio":
             return self._understand_audio(bundle, prompt, timeout, language)
         elif bundle.content_type == "image":
@@ -99,6 +97,8 @@ class MimoAdapter(ContentModel):
         timeout: int,
         language: str,
         frame_config: FrameConfig | None = None,
+        output_format: str = "text",
+        json_schema: dict | None = None,
     ) -> str:
         """Video understanding with optional audio.
 
@@ -155,7 +155,6 @@ class MimoAdapter(ContentModel):
             import base64 as b64mod
             from pathlib import Path
 
-            from content_understand.preprocessing import ContentPreprocessor
             audio_data = b64mod.b64encode(Path(bundle.audio_path).read_bytes()).decode()
             content.append({
                 "type": "input_audio",
@@ -172,7 +171,7 @@ class MimoAdapter(ContentModel):
         }
 
         # Structured output: MiMo supports response_format
-        if getattr(self, "_output_format", "text") == "json":
+        if output_format == "json":
             body["response_format"] = {"type": "json_object"}
             body["temperature"] = 0.1
 
@@ -182,7 +181,7 @@ class MimoAdapter(ContentModel):
         )
 
         # Parse JSON if structured output was requested
-        if getattr(self, "_output_format", "text") == "json":
+        if output_format == "json":
             import json
             try:
                 return json.loads(result)

@@ -6,19 +6,26 @@ async function getBase(): Promise<string | null> {
   if (baseUrl) return baseUrl
   try {
     baseUrl = await window.api.getSidecarBase()
+    console.log('[sidecar] getBase resolved:', baseUrl)
     return baseUrl
-  } catch {
+  } catch (e) {
+    console.error('[sidecar] getBase failed:', e)
     return null
   }
 }
 
 export async function checkHealth(): Promise<boolean> {
   const base = await getBase()
-  if (!base) return false
+  if (!base) {
+    console.warn('[sidecar] checkHealth: no base URL')
+    return false
+  }
   try {
     const r = await fetch(`${base}/health`, { signal: AbortSignal.timeout(2000) })
+    console.log('[sidecar] checkHealth:', r.status, r.ok)
     return r.ok
-  } catch {
+  } catch (e) {
+    console.error('[sidecar] checkHealth fetch failed:', e)
     return false
   }
 }
@@ -57,10 +64,15 @@ export async function startIngest(url: string): Promise<string | null> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url })
     })
-    if (!r.ok) return null
+    if (!r.ok) {
+      let detail = ""
+      try { const d = await r.json(); detail = d.detail || d.error || "" } catch {}
+      throw new Error(detail || "Ingest failed (" + r.status + ")")
+    }
     const data = (await r.json()) as { job_id: string }
     return data.job_id
-  } catch {
+  } catch (e) {
+    if (e instanceof Error) throw e
     return null
   }
 }
@@ -168,8 +180,11 @@ export async function fetchProviderModels(
   const base = await getBase()
   if (!base) return null
   try {
-    const params = new URLSearchParams({ provider: providerId, base_url: baseUrl, api_key: apiKey })
-    const r = await fetch(`${base}/v1/providers/models?${params}`)
+    const r = await fetch(`${base}/v1/providers/models`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: providerId, base_url: baseUrl, api_key: apiKey })
+    })
     if (!r.ok) return null
     const data = (await r.json()) as { models: string[] }
     return data.models ?? null

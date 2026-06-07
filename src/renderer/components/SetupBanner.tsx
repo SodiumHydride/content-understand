@@ -40,7 +40,22 @@ export function SetupBanner(): React.JSX.Element | null {
     return ''
   }, [sidecarOnline, catalog, isZh, settings.inferenceMode, recommend, t])
 
-  if (!line || !sidecarOnline) return null
+  if (!sidecarOnline) {
+    return (
+      <div className="setup-banner setup-banner-error flex items-center justify-between gap-3 border-b border-[var(--divider)] px-4 py-2 text-xs text-ink-700">
+        <span>{t('errors.sidecarOffline') || 'Engine is offline. Restart the app or check Settings.'}</span>
+        <button
+          type="button"
+          className="btn-ghost shrink-0 py-1 text-[11px]"
+          onClick={() => setSettingsOpen(true)}
+        >
+          {t('nav.settings') || 'Settings'}
+        </button>
+      </div>
+    )
+  }
+
+  if (!line) return null
 
   return (
     <div className="setup-banner flex items-center justify-between gap-3 border-b border-[var(--divider)] px-4 py-2 text-xs text-ink-700">

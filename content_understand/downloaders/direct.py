@@ -12,6 +12,17 @@ from content_understand.downloaders.base import Downloader, VideoInfo
 logger = logging.getLogger(__name__)
 
 
+def _safe_int(value: str | None, default: int = 0) -> int:
+    """Safely parse an integer from a header value, returning *default* on failure."""
+    if value is None:
+        return default
+    try:
+        result = int(value)
+        return result if result >= 0 else default
+    except (ValueError, TypeError):
+        return default
+
+
 class DirectDownloader(Downloader):
     """Download any file via direct HTTP GET."""
 
@@ -22,10 +33,11 @@ class DirectDownloader(Downloader):
         r = requests.head(url, timeout=10, allow_redirects=True, headers={
             "User-Agent": "Mozilla/5.0 (compatible; content-understand/1.0)",
         })
+        r.raise_for_status()
         return VideoInfo(
             url=url,
             title=url.split("/")[-1][:100] or "file",
-            filesize=int(r.headers.get("content-length", 0)),
+            filesize=_safe_int(r.headers.get("content-length")),
             format=r.headers.get("content-type", ""),
         )
 

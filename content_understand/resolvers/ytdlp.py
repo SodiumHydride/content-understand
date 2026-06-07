@@ -8,6 +8,7 @@ import os
 import uuid
 from typing import Any
 
+from content_understand.resolvers._ssrf import validate_url_not_ssrf
 from content_understand.resolvers.base import Resolver, ResolveResult
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class YtdlpResolver(Resolver):
         return not any(s in input for s in skip)
 
     def resolve(self, input: str, ctx: dict[str, Any] | None = None) -> ResolveResult:
+        validate_url_not_ssrf(input)
         try:
             import yt_dlp
         except ImportError:
@@ -49,6 +51,17 @@ class YtdlpResolver(Resolver):
             cache_dir, f"%(id)s_{uuid.uuid4().hex[:8]}.%(ext)s"
         )
 
+        on_progress = (ctx or {}).get("on_progress")
+
+        def _progress_hook(d: dict) -> None:
+            if d.get("status") == "downloading" and on_progress:
+                pct_str = d.get("_percent_str", "0%").replace("%", "").strip()
+                try:
+                    pct = int(float(pct_str))
+                except (ValueError, TypeError):
+                    pct = 0
+                on_progress("download", 5 + int(pct * 0.25), f"Downloading: {d.get('_percent_str', '')}")
+
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -56,6 +69,7 @@ class YtdlpResolver(Resolver):
             "format": f"bv*[height<={quality}]+ba/b[height<={quality}]/b",
             "merge_output_format": "mp4",
             "socket_timeout": 30,
+            "progress_hooks": [_progress_hook],
         }
 
         if cookies_file and os.path.isfile(cookies_file):

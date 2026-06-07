@@ -6,6 +6,7 @@ import logging
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+from content_understand.resolvers._ssrf import validate_url_not_ssrf
 from content_understand.resolvers.base import Resolver, ResolveResult
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,9 @@ class SearchEngineResolver(Resolver):
 
     def resolve(self, input: str, ctx: dict[str, Any] | None = None) -> ResolveResult:
         real_url = self._extract_media_url(input)
+
+        if real_url != input:
+            validate_url_not_ssrf(real_url)
 
         if real_url == input:
             raise RuntimeError(f"Could not extract media URL from search page: {input[:100]}")

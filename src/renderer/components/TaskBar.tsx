@@ -14,11 +14,11 @@ function TaskRow({ task, isZh }: { task: Task; isZh: boolean }): React.JSX.Eleme
   const canDismissOnly = isActive && (task.type === 'pull' || task.type === 'download')
 
   useEffect(() => {
-    if (isDone || isError || task.status === 'cancelled') {
+    if (isDone || task.status === 'cancelled') {
       const timer = setTimeout(() => removeTask(task.id), 5000)
       return () => clearTimeout(timer)
     }
-  }, [isDone, isError, task.status, task.id, removeTask])
+  }, [isDone, task.status, task.id, removeTask])
 
   return (
     <div className="flex items-center gap-2 px-3 py-1.5">
@@ -56,7 +56,10 @@ function TaskRow({ task, isZh }: { task: Task; isZh: boolean }): React.JSX.Eleme
       ) : null}
 
       {isError && task.error ? (
-        <span className="max-w-[200px] truncate text-[10px] text-[var(--color-danger)]">
+        <span
+          className="max-w-[200px] truncate text-[10px] text-[var(--color-danger)]"
+          title={task.error}
+        >
           {task.error}
         </span>
       ) : null}

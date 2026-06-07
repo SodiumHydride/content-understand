@@ -6,6 +6,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
 import { ArrowRight, ChevronRight, Link2, PenLine } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
+import { notify } from '../lib/notify'
 import {
   detectPlatformHint,
   normalizeShelfType,
@@ -43,6 +44,12 @@ export function CaptureView(): React.JSX.Element {
   const submit = useCallback(async () => {
     const url = inputUrl.trim()
     if (!url) return
+    const isUrl = /^https?:\/\//.test(url)
+    const isLocal = url.startsWith('/') || url.startsWith('~') || /^[A-Z]:\\/i.test(url)
+    if (!isUrl && !isLocal) {
+      notify(t('errors.invalidUrl') || 'Please enter a valid URL or file path', { type: 'error' })
+      return
+    }
     setSubmitting(true)
     try {
       await startUnderstand(url)
@@ -59,7 +66,7 @@ export function CaptureView(): React.JSX.Element {
       if (file) {
         setSubmitting(true)
         try {
-          await startUnderstand(file.path || file.name)
+          await startUnderstand((file as File & { path?: string }).path || file.name)
         } finally {
           setSubmitting(false)
         }

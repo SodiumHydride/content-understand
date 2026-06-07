@@ -290,6 +290,9 @@ interface AppState {
   thinkingCanvas: ThinkingCanvasDocument | null
   thinkingCanvasReady: boolean
   thinkingToolPrefs: ThinkingToolPreferences
+  startUnderstandRunning: boolean
+  _healthInterval: ReturnType<typeof setInterval> | null
+  startHealthPolling: () => void
 
   setSettingsOpen: (open: boolean) => void
   setViewMode: (mode: ViewMode) => void
@@ -334,6 +337,7 @@ interface AppState {
   loadThinkingCanvas: () => Promise<void>
   addTask: (task: UnderstandTask) => void
   updateTask: (id: string, patch: Partial<UnderstandTask>) => void
+  removeTask: (id: string) => void
   refreshLibrary: () => Promise<void>
   startUnderstand: (url: string) => Promise<void>
 }
@@ -362,6 +366,23 @@ export const useAppStore = create<AppState>()(
       thinkingCanvas: null,
       thinkingCanvasReady: false,
       thinkingToolPrefs: { ...DEFAULT_TOOL_PREFERENCES },
+      startUnderstandRunning: false,
+      _healthInterval: null as ReturnType<typeof setInterval> | null,
+      startHealthPolling: () => {
+        if (get()._healthInterval) return
+        const interval = setInterval(async () => {
+          const { checkHealth } = await import('../lib/sidecar')
+          const ok = await checkHealth()
+          const wasOnline = get().sidecarOnline
+          if (!ok && wasOnline) {
+            set({ sidecarOnline: false })
+          } else if (ok && !wasOnline) {
+            set({ sidecarOnline: true })
+            await get().refreshLibrary()
+          }
+        }, 30_000)
+        set({ _healthInterval: interval })
+      },
 
       setSettingsOpen: (open) => set({ settingsOpen: open }),
       setViewMode: (viewMode) => set({ viewMode }),
@@ -592,6 +613,7 @@ export const useAppStore = create<AppState>()(
         set((s) => ({
           tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch } : t))
         })),
+      removeTask: (id) => set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
 
       refreshLibrary: async () => {
         const { fetchLibrary } = await import('../lib/sidecar')
@@ -608,8 +630,22 @@ export const useAppStore = create<AppState>()(
       },
 
       startUnderstand: async (url: string) => {
+        if (get().startUnderstandRunning) return
+        set({ startUnderstandRunning: true })
         const { startIngest, pollJob } = await import('../lib/sidecar')
-        await get().pushEngineConfig()
+        const configOk = await get().pushEngineConfig()
+        if (!configOk) {
+          const id = crypto.randomUUID()
+          get().addTask({
+            id,
+            url,
+            status: 'failed',
+            error: i18n.t('errors.configSyncFailed'),
+            createdAt: new Date().toISOString()
+          })
+          set({ startUnderstandRunning: false })
+          return
+        }
         const id = crypto.randomUUID()
         const task: UnderstandTask = {
           id,
@@ -626,8 +662,7 @@ export const useAppStore = create<AppState>()(
           if (!jobId) {
             get().updateTask(id, {
               status: 'failed',
-              error:
-                'Engine offline — restart the app or check that the sidecar is running.'
+              error: i18n.t('errors.engineOffline')
             })
             return
           }
@@ -647,6 +682,8 @@ export const useAppStore = create<AppState>()(
             status: 'failed',
             error: e instanceof Error ? e.message : 'failed'
           })
+        } finally {
+          set({ startUnderstandRunning: false })
         }
       }
     }),
@@ -662,11 +699,18 @@ export const useAppStore = create<AppState>()(
           mapMode: s.mapMode,
           thinkingMap: s.thinkingMap,
           wikiMap: s.wikiMap,
-          thinkingToolPrefs: s.thinkingToolPrefs
+          thinkingToolPrefs: s.thinkingToolPrefs,
+          tasks: s.tasks.filter(t => t.status === "completed" || t.status === "failed")
         }
       },
       merge: (persisted: unknown, current) => {
         const merged = { ...current, ...(persisted as Record<string, unknown>) } as AppState
+        if (Array.isArray(merged.tasks)) {
+          // Keep persisted completed/failed tasks, merge with any in-memory processing tasks
+          const persistedTasks = merged.tasks as UnderstandTask[]
+          const processingTasks = current.tasks.filter(t => t.status === "processing")
+          merged.tasks = [...processingTasks, ...persistedTasks]
+        }
         if (merged.settings && !merged.settings.providers) {
           merged.settings = migrateSettings(merged.settings)
         }

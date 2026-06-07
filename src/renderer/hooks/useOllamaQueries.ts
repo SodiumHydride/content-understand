@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   fetchOllamaCatalog,
@@ -73,11 +74,11 @@ export function usePullModel() {
   const failTask = useTaskStore((s) => s.failTask)
 
   // Shared across onMutate + mutationFn (mutations run sequentially)
-  let activeTaskId: string | null = null
+  const activeTaskIdRef = useRef<string | null>(null)
 
   return useMutation({
     onMutate: ({ presetId, modelName, isZh }: PullModelVars) => {
-      activeTaskId = addTask({
+      activeTaskIdRef.current = addTask({
         type: 'pull',
         modelName,
         label: isZh ? `正在拉取 ${modelName}` : `Pulling ${modelName}`,
@@ -87,7 +88,7 @@ export function usePullModel() {
       void queryClient.invalidateQueries({ queryKey: ['ollama', 'catalog'] })
     },
     mutationFn: async ({ presetId, isZh }: PullModelVars) => {
-      const taskId = activeTaskId!
+      const taskId = activeTaskIdRef.current!
 
       const result = await pullOllamaPreset(presetId)
       if (!result.ok) {
@@ -126,12 +127,12 @@ export function usePullModel() {
       return result
     },
     onSuccess: (_data, vars) => {
-      activeTaskId = null
+      activeTaskIdRef.current = null
       notify(vars.isZh ? '模型已就绪' : 'Model ready', { type: 'success' })
       void queryClient.invalidateQueries({ queryKey: ['ollama'] })
     },
     onError: (err: Error, vars) => {
-      activeTaskId = null
+      activeTaskIdRef.current = null
       notify(vars.isZh ? '拉取失败' : 'Pull failed', { type: 'error', description: err.message })
     }
   })

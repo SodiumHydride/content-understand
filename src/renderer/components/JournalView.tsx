@@ -67,7 +67,7 @@ export function JournalView(): React.JSX.Element {
         ) : (
           <div className="journal-lane" role="list">
             {timelineDays.map((day) => (
-              <section key={day.dateKey} className="journal-day-column animate-fade-up" role="listitem">
+              <section key={day.dateKey} className="journal-day-column animate-fade-up" role="listitem" style={{ contentVisibility: "auto" }}>
                 <div className="journal-day-marker">
                   <span className="journal-day-dot" aria-hidden />
                   <h2 className="journal-day-label">{day.label}</h2>

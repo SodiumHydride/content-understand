@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -65,7 +66,8 @@ class OpenAICompatAudioModel(AudioModel):
         )
 
     def _to_wav(self, audio_path: str) -> str:
-        out = tempfile.mktemp(suffix=".wav")
+        fd, out = tempfile.mkstemp(suffix=".wav")
+        os.close(fd)
         cmd = [
             "ffmpeg",
             "-y",
@@ -124,28 +126,31 @@ class OpenAICompatAudioModel(AudioModel):
     ) -> str:
         wav = self._to_wav(audio_path)
         try:
-            return self._transcribe_with_model(wav, timeout)
-        except Exception:
-            body = {
-                "model": self.model_name,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            f"{_TRANSCRIBE_PROMPT}\n"
-                            f"(Audio file: {audio_path}, language hint: {language})"
-                        ),
-                    }
-                ],
-                "max_tokens": self.max_tokens,
-            }
-            return rotate_request(
-                f"{self.api_base}/chat/completions",
-                body,
-                self.rotator,
-                timeout,
-                "openai-compat:audio:transcribe-fallback",
-            )
+            try:
+                return self._transcribe_with_model(wav, timeout)
+            except Exception:
+                body = {
+                    "model": self.model_name,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": (
+                                f"{_TRANSCRIBE_PROMPT}\n"
+                                f"(Audio file: {audio_path}, language hint: {language})"
+                            ),
+                        }
+                    ],
+                    "max_tokens": self.max_tokens,
+                }
+                return rotate_request(
+                    f"{self.api_base}/chat/completions",
+                    body,
+                    self.rotator,
+                    timeout,
+                    "openai-compat:audio:transcribe-fallback",
+                )
+        finally:
+            Path(wav).unlink(missing_ok=True)
 
     def understand_audio(
         self,

@@ -75,16 +75,14 @@ class QwenOmniModel(ContentModel):
         output_format: str = "text",
         json_schema: dict | None = None,
     ) -> str | dict:
-        self._output_format = output_format
-        self._json_schema = json_schema
         if bundle.content_type == "video":
-            return self._understand_video(bundle, prompt, timeout, language)
+            return self._understand_video(bundle, prompt, timeout, language, output_format, json_schema)
         elif bundle.content_type == "audio":
-            return self._understand_audio(bundle, prompt, timeout, language)
+            return self._understand_audio(bundle, prompt, timeout, language, output_format, json_schema)
         elif bundle.content_type == "image":
-            return self._understand_image(bundle, prompt, timeout, language)
+            return self._understand_image(bundle, prompt, timeout, language, output_format, json_schema)
         else:
-            return self._understand_text(bundle, prompt, timeout, language)
+            return self._understand_text(bundle, prompt, timeout, language, output_format, json_schema)
 
     def _understand_video(
         self,
@@ -92,7 +90,9 @@ class QwenOmniModel(ContentModel):
         prompt: str,
         timeout: int,
         language: str,
-    ) -> str:
+        output_format: str = "text",
+        json_schema: dict | None = None,
+    ) -> str | dict:
         """Video with audio — Qwen Omni's key feature.
 
         Uses use_audio_in_video=True to process video frames + audio simultaneously.
@@ -127,7 +127,7 @@ class QwenOmniModel(ContentModel):
         # Add prompt
         content.append({"type": "text", "text": prompt or self._default_prompt(language)})
 
-        return self._chat(content, timeout)
+        return self._chat(content, timeout, output_format)
 
     def _understand_audio(
         self,
@@ -135,7 +135,9 @@ class QwenOmniModel(ContentModel):
         prompt: str,
         timeout: int,
         language: str,
-    ) -> str:
+        output_format: str = "text",
+        json_schema: dict | None = None,
+    ) -> str | dict:
         content: list[dict[str, Any]] = []
         if bundle.audio_path:
             audio_b64 = self._file_to_base64(bundle.audio_path)
@@ -145,7 +147,7 @@ class QwenOmniModel(ContentModel):
                     "input_audio": {"data": audio_b64, "format": "wav"},
                 })
         content.append({"type": "text", "text": prompt or self._default_audio_prompt(language)})
-        return self._chat(content, timeout)
+        return self._chat(content, timeout, output_format)
 
     def _understand_image(
         self,
@@ -153,7 +155,9 @@ class QwenOmniModel(ContentModel):
         prompt: str,
         timeout: int,
         language: str,
-    ) -> str:
+        output_format: str = "text",
+        json_schema: dict | None = None,
+    ) -> str | dict:
         content: list[dict[str, Any]] = []
         for img_path in bundle.images:
             b64 = self._file_to_base64(str(img_path))
@@ -163,7 +167,7 @@ class QwenOmniModel(ContentModel):
                     "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
                 })
         content.append({"type": "text", "text": prompt or self._default_prompt(language)})
-        return self._chat(content, timeout)
+        return self._chat(content, timeout, output_format)
 
     def _understand_text(
         self,
@@ -171,14 +175,16 @@ class QwenOmniModel(ContentModel):
         prompt: str,
         timeout: int,
         language: str,
-    ) -> str:
+        output_format: str = "text",
+        json_schema: dict | None = None,
+    ) -> str | dict:
         text = bundle.text or ""
         effective_prompt = prompt or self._default_prompt(language)
         if text:
             effective_prompt = f"{effective_prompt}\n\n{text[:60000]}"
-        return self._chat([{"type": "text", "text": effective_prompt}], timeout)
+        return self._chat([{"type": "text", "text": effective_prompt}], timeout, output_format)
 
-    def _chat(self, content: list[dict], timeout: int) -> str | dict:
+    def _chat(self, content: list[dict], timeout: int, output_format: str = "text") -> str | dict:
         url = f"{self.api_base}/chat/completions"
         body = {
             "model": self.model_name,
@@ -187,7 +193,6 @@ class QwenOmniModel(ContentModel):
         }
 
         # Structured output: vLLM/SGLang support response_format
-        output_format = getattr(self, "_output_format", "text")
         if output_format == "json":
             body["response_format"] = {"type": "json_object"}
             body["temperature"] = 0.1

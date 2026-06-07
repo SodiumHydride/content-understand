@@ -118,17 +118,16 @@ def parse_json(raw: str) -> dict | list | None:
         pass
 
     # Try extracting JSON from within larger text
-    # Look for the first { or [ and try to parse from there
-    for start_char, _end_char in [("{", "}"), ("[", "]")]:
-        start = raw.find(start_char)
-        if start == -1:
+    decoder = json.JSONDecoder()
+    for start_char in ("{", "["):
+        idx = raw.find(start_char)
+        if idx == -1:
             continue
-        # Try progressively shorter substrings
-        for end in range(len(raw), start, -1):
-            try:
-                return json.loads(raw[start:end])
-            except json.JSONDecodeError:
-                continue
+        try:
+            obj, _ = decoder.raw_decode(raw, idx)
+            return obj
+        except json.JSONDecodeError:
+            continue
 
     logger.warning("Failed to parse JSON from LLM output (length=%d)", len(raw))
     return None

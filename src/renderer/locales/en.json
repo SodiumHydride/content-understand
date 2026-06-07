@@ -262,10 +262,57 @@
     "localWorking": "Preparing local engine…",
     "openSettings": "Settings"
   },
+  "ollama": {
+    "panelTitle": "Local inference · Ollama",
+    "panelHint": "Catalog presets only; app Ollama + models live in app data",
+    "sourceApp": "App Ollama",
+    "sourceSystem": "System Ollama",
+    "sourceOffline": "Offline",
+    "systemModelsDir": "system models dir",
+    "healthHealthy": "Healthy",
+    "healthUnhealthy": "Unhealthy",
+    "healthRestarting": "Restarting",
+    "healthError": "Error",
+    "preferSystemOllama": "Prefer system Ollama when running (catalog models still manageable)",
+    "downloadAppOllama": "Download app Ollama",
+    "connectStart": "Connect / Start",
+    "stop": "Stop",
+    "removeAppOllama": "Remove app Ollama",
+    "starting": "Starting…",
+    "connected": "Connected",
+    "startFailed": "Start failed",
+    "stopping": "Stopping…",
+    "stopped": "Stopped",
+    "stopFailed": "Stop failed",
+    "downloadingAppOllama": "Downloading app Ollama…",
+    "downloadFailed": "Download failed",
+    "alreadyInstalled": "Ollama already installed, starting…",
+    "ollamaDownloaded": "Ollama downloaded, starting…",
+    "removedAppOllama": "App Ollama removed (system install untouched)",
+    "removeFailed": "Remove failed",
+    "refresh": "Refresh",
+    "retry": "Retry",
+    "modelCatalog": "Model catalog",
+    "loadingCatalog": "Loading catalog…",
+    "noCatalogPresets": "No catalog presets (check sidecar connection)",
+    "pull": "Pull",
+    "deleteModel": "Delete model",
+    "installed": "Installed"
+  },
+  "provider": {
+    "custom": "Custom…",
+    "model": "Model",
+    "refreshInstalled": "Refresh installed",
+    "fetchModels": "Fetch models",
+    "localPullHint": "Pull a preset model in the Ollama panel above first; installed models appear here.",
+    "commaSeparated": "Comma-separated, auto-rotation"
+  },
   "errors": {
     "invalidUrl": "Enter a valid URL or choose a file",
     "sidecarOffline": "Engine offline — showing demo data",
     "duplicate": "This URL was already understood",
-    "failed": "Understanding failed"
+    "failed": "Understanding failed",
+    "engineOffline": "Engine offline — restart the app or check that the sidecar is running.",
+    "configSyncFailed": "Failed to sync settings with engine. Check that the sidecar is running."
   }
 }

@@ -51,7 +51,7 @@ _manager_lock = threading.Lock()
 
 class RuntimeManager:
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._state: str = "idle"
         self._message: str = ""
         self._progress: dict[str, Any] = {"stage": "", "percent": 0, "message": ""}
@@ -650,11 +650,20 @@ class RuntimeManager:
         }
 
     def _pull_worker(self, preset_id: str) -> None:
+        last_log_ts = 0.0
+        last_log_pct = -1
+
         def prog(info: dict[str, Any]) -> None:
+            nonlocal last_log_ts, last_log_pct
             stage = info.get("stage", "pull")
             pct = info.get("percent", 0)
             msg = info.get("message", "")
-            logger.info("Pull %s: [%s] %s%% %s", preset_id, stage, pct, msg)
+            now = _time_mod.monotonic()
+            # Throttle logging: every 3s or when percent changes by >=5%
+            if now - last_log_ts >= 3.0 or abs(pct - last_log_pct) >= 5:
+                logger.info("Pull %s: [%s] %s%% %s", preset_id, stage, pct, msg)
+                last_log_ts = now
+                last_log_pct = pct
             self._set_state(
                 progress={
                     "stage": stage,

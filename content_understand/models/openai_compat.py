@@ -35,6 +35,13 @@ class OpenAICompatModel(VideoModel):
         self.max_tokens = config.max_tokens or 4096
         self.timeout = config.timeout or 120
 
+    def _default_prompt(self, language: str = "zh") -> str:
+        prompts = {
+            "zh": "请详细分析这段视频的内容，包括主要场景、关键事件和重要细节。",
+            "en": "Analyze this video in detail, including main scenes, key events, and important details.",
+        }
+        return prompts.get(language, prompts["zh"])
+
     def _is_local_endpoint(self) -> bool:
         return "127.0.0.1" in self.api_base or "localhost" in self.api_base
 

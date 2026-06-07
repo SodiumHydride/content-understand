@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { useCallback } from 'react'
 import { ChevronDown, Loader2, RefreshCw } from 'lucide-react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
@@ -31,7 +32,7 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
   const hasBaseUrl = preset?.baseUrl || provider.id === 'openai_compat'
   const isLocal = provider.id === 'local_server'
 
-  const handleFetchModels = async (): Promise<void> => {
+  const handleFetchModels = useCallback(async (): Promise<void> => {
     if (!provider.baseUrl && !preset?.baseUrl && !isLocal) return
     setLoading(true)
     const models = await fetchProviderModels(
@@ -51,7 +52,7 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
       onChange(patch)
     }
     setLoading(false)
-  }
+  }, [provider.baseUrl, provider.apiKeys, provider.id, provider.selectedModel, isLocal, onChange, preset?.baseUrl])
 
   // Auto-fetch models when provider is enabled and has credentials
   React.useEffect(() => {
@@ -70,13 +71,13 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
       autoFetched.current = true
       void handleFetchModels()
     }
-  }, [provider.enabled, provider.apiKeys])
+  }, [provider.baseUrl, provider.id, provider.enabled, provider.apiKeys, isLocal, handleFetchModels])
 
   const modelOptions: SelectOption[] = isLocal
     ? provider.models.map((m) => ({ value: m, label: m }))
     : [
         ...provider.models.map((m) => ({ value: m, label: m })),
-        { value: '__custom__', label: isZh ? '自定义...' : 'Custom...' }
+        { value: '__custom__', label: t('provider.custom') }
       ]
 
   const effectiveModel = provider.models.includes(provider.selectedModel)
@@ -162,7 +163,7 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
               />
               {provider.id === 'mimo' && (
                 <p className="mt-1 text-[10px] text-ink-500">
-                  {isZh ? '多个 key 用逗号分隔，自动轮换' : 'Comma-separated, auto-rotation'}
+                  {t('provider.commaSeparated')}
                 </p>
               )}
             </div>
@@ -172,7 +173,7 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
           <div>
             <div className="flex items-center justify-between">
               <span className="settings-field-label">
-                {isZh ? '模型' : 'Model'}
+                {t('provider.model')}
               </span>
               <button
                 type="button"
@@ -186,8 +187,8 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
                   <RefreshCw size={10} />
                 )}
                 {isLocal
-                  ? (isZh ? '刷新已安装' : 'Refresh installed')
-                  : (isZh ? '拉取模型列表' : 'Fetch models')}
+                  ? t('provider.refreshInstalled')
+                  : t('provider.fetchModels')}
               </button>
             </div>
             {provider.models.length > 0 ? (
@@ -205,9 +206,7 @@ export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): R
               />
             ) : isLocal ? (
               <p className="text-[11px] leading-relaxed text-ink-500">
-                {isZh
-                  ? '请先在上方 Ollama 面板拉取 preset 模型，拉取后会出现在这里。'
-                  : 'Pull a preset model in the Ollama panel above first; installed models appear here.'}
+                {t('provider.localPullHint')}
               </p>
             ) : (
               <input

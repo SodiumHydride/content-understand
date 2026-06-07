@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 
 from content_understand.config import BackendConfig, ContentConfig
@@ -71,12 +72,31 @@ def main() -> None:
                     print()
                     print("Tags:", " ".join(f"#{t}" for t in result["tags"]))
                 print()
+        except FileNotFoundError as e:
+            msg = str(e)
+            if "ffmpeg" in msg.lower():
+                print(
+                    "Error: ffmpeg is not installed. Install it:\n"
+                    "  brew install ffmpeg  (macOS)\n"
+                    "  apt install ffmpeg  (Ubuntu/Debian)",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"Error: File not found: {e}", file=sys.stderr)
+            sys.exit(1)
+        except RuntimeError as e:
+            msg = str(e)
+            if "yt-dlp" in msg.lower():
+                print(f"Error: {msg}\nInstall: pip install yt-dlp", file=sys.stderr)
+            elif "ffmpeg" in msg.lower():
+                print(f"Error: {msg}\nInstall: brew install ffmpeg", file=sys.stderr)
+            else:
+                print(f"Error: {msg}", file=sys.stderr)
+            sys.exit(1)
         except Exception as e:
-            print(f"Error: {e}", file=sys.stderr)
+            print(f"Unexpected error: {e}", file=sys.stderr)
             sys.exit(1)
 
 
 if __name__ == "__main__":
-    import logging
-
     main()

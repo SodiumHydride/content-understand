@@ -1,5 +1,4 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
 
 export interface AppDataPaths {
   appData: string
@@ -7,6 +6,7 @@ export interface AppDataPaths {
   cache: string
   models: string
   exports: string
+  runtime: string
 }
 
 const api = {
@@ -28,7 +28,6 @@ const api = {
     ipcRenderer.invoke('app:deleteAllData'),
 }
 
-contextBridge.exposeInMainWorld('electron', electronAPI)
 contextBridge.exposeInMainWorld('api', api)
 
 export type AppApi = typeof api

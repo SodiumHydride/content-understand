@@ -82,10 +82,8 @@ class OpenAICompatAdapter(ContentModel):
         output_format: str = "text",
         json_schema: dict | None = None,
     ) -> str | dict:
-        self._output_format = output_format
-        self._json_schema = json_schema
         if bundle.content_type == "video":
-            return self._understand_video(bundle, prompt, timeout, language)
+            return self._understand_video(bundle, prompt, timeout, language, output_format, json_schema)
         elif bundle.content_type == "audio":
             return self._understand_audio(bundle, prompt, timeout, language)
         elif bundle.content_type == "image":
@@ -99,6 +97,8 @@ class OpenAICompatAdapter(ContentModel):
         prompt: str,
         timeout: int,
         language: str,
+        output_format: str = "text",
+        json_schema: dict | None = None,
     ) -> str:
         """Video understanding via frame extraction (existing behavior)."""
         model = self._get_model("video")

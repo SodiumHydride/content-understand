@@ -61,10 +61,18 @@ _DEFAULT_AUDIO_PROMPT: dict[str, str] = {
 
 
 def _gemini_url_factory(model_name: str):
-    """Return a url_factory that puts the API key in the query param."""
-    def _build_url(key: str) -> str:
-        return f"{_GEMINI_API_BASE}/{model_name}:generateContent?key={key}"
+    """Return a url_factory that builds the Gemini endpoint URL (no key in query)."""
+    def _build_url(_key: str) -> str:
+        return f"{_GEMINI_API_BASE}/{model_name}:generateContent"
     return _build_url
+
+
+def _gemini_headers(key: str) -> dict[str, str]:
+    """Return headers for Gemini API using x-goog-api-key."""
+    return {
+        "x-goog-api-key": key,
+        "Content-Type": "application/json",
+    }
 
 
 class GeminiAudioModel(AudioModel):
@@ -100,6 +108,7 @@ class GeminiAudioModel(AudioModel):
             timeout,
             f"gemini-audio:{label}",
             url_factory=self._url_factory,
+            headers_factory=_gemini_headers,
         )
 
         # Parse JSON if structured output was requested

@@ -262,10 +262,57 @@
     "localWorking": "正在准备本地引擎…",
     "openSettings": "设置"
   },
+  "ollama": {
+    "panelTitle": "本地推理 · Ollama",
+    "panelHint": "仅使用目录中的 preset 模型；应用 Ollama 与模型存放在应用数据目录",
+    "sourceApp": "应用内 Ollama",
+    "sourceSystem": "系统 Ollama",
+    "sourceOffline": "未连接",
+    "systemModelsDir": "系统模型目录",
+    "healthHealthy": "健康",
+    "healthUnhealthy": "异常",
+    "healthRestarting": "重启中",
+    "healthError": "错误",
+    "preferSystemOllama": "若系统已运行 Ollama，优先连接（仍可管理目录内模型）",
+    "downloadAppOllama": "下载应用内 Ollama",
+    "connectStart": "连接 / 启动",
+    "stop": "停止",
+    "removeAppOllama": "移除应用内 Ollama",
+    "starting": "正在启动…",
+    "connected": "已连接",
+    "startFailed": "启动失败",
+    "stopping": "正在停止…",
+    "stopped": "已停止",
+    "stopFailed": "停止失败",
+    "downloadingAppOllama": "正在下载应用内 Ollama…",
+    "downloadFailed": "下载失败",
+    "alreadyInstalled": "Ollama 已在应用目录，正在启动…",
+    "ollamaDownloaded": "Ollama 已下载，正在启动…",
+    "removedAppOllama": "已移除应用内 Ollama（系统 Ollama 不受影响）",
+    "removeFailed": "移除失败",
+    "refresh": "刷新",
+    "retry": "重试",
+    "modelCatalog": "模型目录",
+    "loadingCatalog": "加载目录…",
+    "noCatalogPresets": "暂无 preset 模型（请确认 sidecar 已连接）",
+    "pull": "拉取",
+    "deleteModel": "删除模型",
+    "installed": "已安装"
+  },
+  "provider": {
+    "custom": "自定义...",
+    "model": "模型",
+    "refreshInstalled": "刷新已安装",
+    "fetchModels": "拉取模型列表",
+    "localPullHint": "请先在上方 Ollama 面板拉取 preset 模型，拉取后会出现在这里。",
+    "commaSeparated": "多个 key 用逗号分隔，自动轮换"
+  },
   "errors": {
     "invalidUrl": "请输入有效的链接或选择文件",
     "sidecarOffline": "引擎未连接，已使用演示数据",
     "duplicate": "该链接已理解过",
-    "failed": "理解失败"
+    "failed": "理解失败",
+    "engineOffline": "引擎未连接 — 请重启应用或确认 sidecar 正在运行。",
+    "configSyncFailed": "设置同步失败。请检查 sidecar 是否正在运行。"
   }
 }

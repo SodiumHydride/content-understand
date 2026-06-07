@@ -37,7 +37,13 @@ def _file_url_to_path(url: str) -> str:
     """
     parsed = urlparse(url)
     # url2pathname handles platform-specific path conversion
-    return url2pathname(parsed.path)
+    path = url2pathname(parsed.path)
+    path = os.path.normpath(path)
+    # Reject path traversal attempts
+    parts = path.replace("\\", "/").split("/")
+    if ".." in parts:
+        raise ValueError(f"Path traversal detected in file URL: {url}")
+    return path
 
 
 class LocalFileResolver(Resolver):

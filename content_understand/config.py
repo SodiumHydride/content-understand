@@ -105,7 +105,14 @@ class ContentConfig(BaseModel):
             f"Backend '{name}' is not configured. Available backends: {known}"
         )
 
+    _KNOWN_CONTENT_TYPES = frozenset({"video", "image", "audio", "article"})
+
     def backend_for_content_type(self, content_type: str) -> tuple[str, BackendConfig]:
         """Return (backend_name, BackendConfig) for a given content type."""
+        if content_type not in self._KNOWN_CONTENT_TYPES:
+            raise ValueError(
+                f"Unknown content_type '{content_type}'. "
+                f"Expected one of: {', '.join(sorted(self._KNOWN_CONTENT_TYPES))}"
+            )
         name = getattr(self, f"{content_type}_backend", None) or self.video_backend
         return name, self.get_backend(name)

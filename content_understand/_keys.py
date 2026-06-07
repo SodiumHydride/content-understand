@@ -209,7 +209,15 @@ def rotate_request(
             )
 
         # 4xx non-429: do not retry
-        raise RuntimeError(f"[{label}] HTTP {r.status_code}: {r.text[:300]}")
+        detail = r.text[:300]
+        if r.status_code == 404 and "not found" in detail.lower():
+            raise RuntimeError(
+                f"[{label}] Model not found (404). "
+                f"The model may not be installed in Ollama. "
+                f"Install it from Settings → Ollama, or check the model name. "
+                f"Detail: {detail}"
+            )
+        raise RuntimeError(f"[{label}] HTTP {r.status_code}: {detail}")
 
     return _attempt()
 

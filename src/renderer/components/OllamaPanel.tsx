@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from 'react'
 import clsx from 'clsx'
 import { Download, Loader2, Play, RefreshCw, Square, Trash2, AlertCircle } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
+import { useTranslation } from 'react-i18next'
 import {
   downloadOllama,
   uninstallAppOllama,
@@ -47,11 +48,11 @@ function healthColor(health?: string): string {
   return 'bg-ink-400'
 }
 
-function healthLabel(health: string | undefined, isZh: boolean): string {
-  if (health === 'healthy') return isZh ? '健康' : 'Healthy'
-  if (health === 'unhealthy') return isZh ? '异常' : 'Unhealthy'
-  if (health === 'restarting') return isZh ? '重启中' : 'Restarting'
-  if (health === 'error') return isZh ? '错误' : 'Error'
+function healthLabel(health: string | undefined, t: (key: string) => string): string {
+  if (health === 'healthy') return t('ollama.healthHealthy')
+  if (health === 'unhealthy') return t('ollama.healthUnhealthy')
+  if (health === 'restarting') return t('ollama.healthRestarting')
+  if (health === 'error') return t('ollama.healthError')
   return ''
 }
 
@@ -75,6 +76,7 @@ export function OllamaPanel({
   useUserOllama,
   onUseUserOllamaChange
 }: OllamaPanelProps): React.JSX.Element {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [loading, setLoading] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
@@ -124,7 +126,7 @@ export function OllamaPanel({
 
   const handleStart = async (): Promise<void> => {
     setLoading(true)
-    setActionMsg(isZh ? '正在启动…' : 'Starting…')
+    setActionMsg(t('ollama.starting'))
     try {
       const result = await startMutation.mutateAsync(useUserOllama)
       let source = result.source
@@ -134,43 +136,43 @@ export function OllamaPanel({
           timeoutMs: 10 * 60 * 1000,
           failIf: (c) =>
             c.operation?.state === 'error'
-              ? c.operation.message || (isZh ? '启动失败' : 'Start failed')
+              ? c.operation.message || t('ollama.startFailed')
               : null
         })
         source = ready.source ?? source
         void queryClient.invalidateQueries({ queryKey: ['ollama'] })
       }
       setActionMsg(
-        `${isZh ? '已连接' : 'Connected'} · ${source === 'user' ? (isZh ? '系统' : 'system') : (isZh ? '应用内' : 'app')}`
+        `${t('ollama.connected')} · ${source === 'user' ? t('ollama.sourceSystem') : t('ollama.sourceApp')}`
       )
     } catch (err) {
-      setActionMsg((err as Error).message || (isZh ? '启动失败' : 'Start failed'))
+      setActionMsg((err as Error).message || t('ollama.startFailed'))
     } finally {
       setLoading(false)
     }
   }
 
   const handleStop = async (): Promise<void> => {
-    setActionMsg(isZh ? '正在停止…' : 'Stopping…')
+    setActionMsg(t('ollama.stopping'))
     try {
       await stopMutation.mutateAsync()
-      setActionMsg(isZh ? '已停止' : 'Stopped')
+      setActionMsg(t('ollama.stopped'))
     } catch {
-      setActionMsg(isZh ? '停止失败' : 'Stop failed')
+      setActionMsg(t('ollama.stopFailed'))
     }
   }
 
   const handleDownloadBinary = async (): Promise<void> => {
     setLoading(true)
-    setActionMsg(isZh ? '正在下载应用内 Ollama…' : 'Downloading app Ollama…')
+    setActionMsg(t('ollama.downloadingAppOllama'))
     try {
       const result = await downloadOllama()
       if (!result.ok) {
-        setActionMsg(result.error || (isZh ? '下载失败' : 'Download failed'))
+        setActionMsg(result.error || t('ollama.downloadFailed'))
         return
       }
       if (result.status === 'already_installed') {
-        setActionMsg(isZh ? 'Ollama 已在应用目录，正在启动…' : 'Ollama already installed, starting…')
+        setActionMsg(t('ollama.alreadyInstalled'))
         await handleStart()
         return
       }
@@ -187,10 +189,10 @@ export function OllamaPanel({
         })
         void queryClient.invalidateQueries({ queryKey: ['ollama'] })
       }
-      setActionMsg(isZh ? 'Ollama 已下载，正在启动…' : 'Ollama downloaded, starting…')
+      setActionMsg(t('ollama.ollamaDownloaded'))
       await handleStart()
     } catch (err) {
-      setActionMsg((err as Error).message || (isZh ? '下载失败' : 'Download failed'))
+      setActionMsg((err as Error).message || t('ollama.downloadFailed'))
     } finally {
       setLoading(false)
     }
@@ -200,15 +202,7 @@ export function OllamaPanel({
     setLoading(true)
     try {
       const ok = await uninstallAppOllama()
-      setActionMsg(
-        ok
-          ? isZh
-            ? '已移除应用内 Ollama（系统 Ollama 不受影响）'
-            : 'App Ollama removed (system install untouched)'
-          : isZh
-            ? '移除失败'
-            : 'Remove failed'
-      )
+      setActionMsg(ok ? t('ollama.removedAppOllama') : t('ollama.removeFailed'))
       refresh()
     } finally {
       setLoading(false)
@@ -216,9 +210,9 @@ export function OllamaPanel({
   }
 
   const sourceLabel = (source: OllamaCatalog['source']): string => {
-    if (source === 'app') return isZh ? '应用内 Ollama' : 'App Ollama'
-    if (source === 'user') return isZh ? '系统 Ollama' : 'System Ollama'
-    return isZh ? '未连接' : 'Offline'
+    if (source === 'app') return t('ollama.sourceApp')
+    if (source === 'user') return t('ollama.sourceSystem')
+    return t('ollama.sourceOffline')
   }
 
   return (
@@ -226,19 +220,17 @@ export function OllamaPanel({
       <div className="flex items-center justify-between border-b border-[var(--divider)] px-3 py-2.5">
         <div>
           <span className="text-[13px] font-semibold text-ink-800">
-            {isZh ? '本地推理 · Ollama' : 'Local inference · Ollama'}
+            {t('ollama.panelTitle')}
           </span>
           <p className="mt-0.5 text-[10px] text-ink-500">
-            {isZh
-              ? '仅使用目录中的 preset 模型；应用 Ollama 与模型存放在应用数据目录'
-              : 'Catalog presets only; app Ollama + models live in app data'}
+            {t('ollama.panelHint')}
           </p>
         </div>
         <button
           type="button"
           className="btn-ghost rounded p-1"
           onClick={refresh}
-          title={isZh ? '刷新' : 'Refresh'}
+          title={t('ollama.refresh')}
         >
           <RefreshCw size={14} />
         </button>
@@ -252,7 +244,7 @@ export function OllamaPanel({
           <span className="text-ink-700">{sourceLabel(catalog?.source ?? null)}</span>
           {catalog?.running && catalog.models_dir ? (
             <span className="text-[10px] text-ink-500" style={{ fontFamily: 'var(--font-mono)' }}>
-              {catalog.source === 'app' ? catalog.models_dir : isZh ? '系统模型目录' : 'system models dir'}
+              {catalog.source === 'app' ? catalog.models_dir : t('ollama.systemModelsDir')}
             </span>
           ) : null}
           {health && health !== 'healthy' ? (
@@ -263,7 +255,7 @@ export function OllamaPanel({
               )}
             >
               {health === 'error' ? <AlertCircle size={10} /> : null}
-              {healthLabel(health, isZh)}
+              {healthLabel(health, t)}
             </span>
           ) : null}
         </div>
@@ -274,9 +266,7 @@ export function OllamaPanel({
             checked={useUserOllama}
             onChange={(e) => onUseUserOllamaChange(e.target.checked)}
           />
-          {isZh
-            ? '若系统已运行 Ollama，优先连接（仍可管理目录内模型）'
-            : 'Prefer system Ollama when running (catalog models still manageable)'}
+          {t('ollama.preferSystemOllama')}
         </label>
 
         <div className="flex flex-wrap gap-2">
@@ -289,7 +279,7 @@ export function OllamaPanel({
               onClick={() => void handleDownloadBinary()}
             >
               {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-              {isZh ? '下载应用内 Ollama' : 'Download app Ollama'}
+              {t('ollama.downloadAppOllama')}
             </button>
           ) : null}
           {/* Connect / Start: not running + can start (binary installed OR user Ollama allowed) */}
@@ -301,7 +291,7 @@ export function OllamaPanel({
               onClick={() => void handleStart()}
             >
               {loading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-              {isZh ? '连接 / 启动' : 'Connect / Start'}
+              {t('ollama.connectStart')}
             </button>
           ) : null}
           {/* Stop: only for app-managed Ollama (not system) */}
@@ -313,7 +303,7 @@ export function OllamaPanel({
               onClick={() => void handleStop()}
             >
               <Square size={14} />
-              {isZh ? '停止' : 'Stop'}
+              {t('ollama.stop')}
             </button>
           ) : null}
           {/* Remove: only when binary installed AND not running */}
@@ -325,7 +315,7 @@ export function OllamaPanel({
               onClick={() => void handleUninstallApp()}
             >
               <Trash2 size={14} />
-              {isZh ? '移除应用内 Ollama' : 'Remove app Ollama'}
+              {t('ollama.removeAppOllama')}
             </button>
           ) : null}
         </div>
@@ -340,7 +330,7 @@ export function OllamaPanel({
                 className="mt-1 text-[10px] text-[var(--color-accent)] hover:underline"
                 onClick={refresh}
               >
-                {isZh ? '重试' : 'Retry'}
+                {t('ollama.retry')}
               </button>
             </div>
           </div>
@@ -354,14 +344,14 @@ export function OllamaPanel({
 
         <div className="space-y-1.5">
           <span className="settings-field-label">
-            {isZh ? '模型目录' : 'Model catalog'}
+            {t('ollama.modelCatalog')}
           </span>
           <div className="max-h-64 space-y-1.5 overflow-y-auto">
             {catalogLoading && presets.length === 0 ? (
-              <p className="text-[11px] text-ink-500">{isZh ? '加载目录…' : 'Loading catalog…'}</p>
+              <p className="text-[11px] text-ink-500">{t('ollama.loadingCatalog')}</p>
             ) : presets.length === 0 ? (
               <p className="text-[11px] text-ink-500">
-                {isZh ? '暂无 preset 模型（请确认 sidecar 已连接）' : 'No catalog presets (check sidecar connection)'}
+                {t('ollama.noCatalogPresets')}
               </p>
             ) : (
               presets.map((preset) => {
@@ -399,7 +389,7 @@ export function OllamaPanel({
                         </p>
                         {preset.installed && preset.size ? (
                           <p className="text-[10px] text-green-700">
-                            {isZh ? '已安装' : 'Installed'} · {formatBytes(preset.size)}
+                            {t('ollama.installed')} · {formatBytes(preset.size)}
                           </p>
                         ) : null}
                         {(isZh ? preset.ollama_note_zh : preset.ollama_note_en) ? (
@@ -418,10 +408,8 @@ export function OllamaPanel({
                           >
                             {pullingThis ? (
                               <Loader2 size={12} className="animate-spin" />
-                            ) : isZh ? (
-                              '拉取'
                             ) : (
-                              'Pull'
+                              t('ollama.pull')
                             )}
                           </button>
                         ) : (
@@ -429,7 +417,7 @@ export function OllamaPanel({
                             type="button"
                             className="btn-ghost rounded p-1 text-ink-500 hover:text-[var(--color-danger)]"
                             onClick={() => handleDelete(preset)}
-                            title={isZh ? '删除模型' : 'Delete model'}
+                            title={t('ollama.deleteModel')}
                           >
                             <Trash2 size={12} />
                           </button>

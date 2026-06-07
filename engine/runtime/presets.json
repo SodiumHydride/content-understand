@@ -32,6 +32,21 @@
       "ollama_model": "gemma4:12b"
     },
     {
+      "id": "gemma4-12b-qat",
+      "tier": "balanced",
+      "min_ram_gb": 12,
+      "min_vram_gb": 0,
+      "min_unified_memory_gb": 12,
+      "download_size_gb": 7.2,
+      "modalities": ["article", "image", "video", "audio"],
+      "omni": true,
+      "cpu_recommended": true,
+      "gpu_recommended": false,
+      "label_zh": "QAT 高质量 · Gemma 4 12B QAT（7.2GB，接近原版质量，256K 上下文）",
+      "label_en": "QAT Quality · Gemma 4 12B QAT (7.2GB, near-bf16 quality, 256K context)",
+      "ollama_model": "gemma4:12b-it-qat"
+    },
+    {
       "id": "minicpm-o2.6",
       "tier": "balanced",
       "min_ram_gb": 12,
