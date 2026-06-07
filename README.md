@@ -1,87 +1,98 @@
 # Content Understand
 
-Desktop app for multimodal **content understanding** and **local Markdown storage**.
+Desktop app for **multimodal content understanding** and **local Markdown wiki**.
+
+Feed it a video, image, audio, or article URL — it understands the content and writes a structured wiki page to your local vault.
 
 - **UI**: Electron + React + Tailwind — bilingual (zh/en)
-- **Engine**: bundled Python engine — fetch (yt-dlp / HTTP) → multimodal understand → vault write
-- **Storage**: Wiki lives under **app userData** (not a user-picked `C:` / `D:` path). Export `.md` anytime.
+- **Engine**: Python sidecar — fetch → multimodal understand → wiki write
+- **Models**: Gemma 4 QAT (local), MiMo, Gemini, Claude, OpenAI-compatible
+- **Storage**: Markdown wiki in app userData, export anytime
 
 ## Quick start
 
 ```bash
 npm install
+pip install -r requirements.txt
 npm run dev
 ```
 
-Electron spawns the sidecar automatically. No extra engine install needed.
+Electron spawns the Python sidecar automatically. No extra setup needed.
 
-### Manual sidecar (dev)
+## Features
 
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-export CONTENT_APP_DATA="$HOME/.content-understand"
-python3 sidecar/server.py --port 17890
-```
+- **Video understanding**: automatic 30s segmentation, frame extraction, audio transcription, structured wiki output
+- **Multimodal**: video, image, audio, article — one app handles all
+- **Local-first**: Gemma 4 12B QAT runs entirely on your machine (7.2 GB, 12+ GB RAM)
+- **Wiki output**: YAML frontmatter + timeline + key points + detailed content (Obsidian-compatible)
+- **Bilibili / YouTube**: built-in video download via yt-dlp
+
+## Recommended model: Gemma 4 12B QAT
+
+The best local model for this app. Install via Settings → Ollama → Pull.
+
+- **7.2 GB** download, Q4 quantization with near-BF16 quality
+- **Encoder-free**: native video + audio + image in a single model
+- **Auto-segmentation**: long videos split into 30s chunks, processed sequentially
+- **256K context**: handles long-form content
 
 ## Project layout
 
 ```
-content_understand/    # Multimodal understanding engine (bundled)
+content_understand/    # Multimodal understanding engine
   pipeline.py          # ContentPipeline — resolve → extract → understand → output
-  models/              # AI backends: MiMo, Gemini, Claude, OpenAI-compat
+  models/              # AI backends: Gemma 4, MiMo, Gemini, Claude, OpenAI-compat
   resolvers/           # URL/file resolution: yt-dlp, HTTP, local, search engine
   extractors/          # HTML (trafilatura) + PDF (PyMuPDF) text extraction
-  preprocessors/       # FFmpeg video normalization + base64 encoding
-  output/              # Markdown + JSON writers
+  preprocessing.py     # FFmpeg video normalization + frame extraction
 engine/                # App-specific engine bridge + runtime
-  paths.py             # App-internal directories
-  fetch/               # yt-dlp (video), HTTP (image/audio)
   understand/          # Orchestration: app config → engine pipeline
-  write/               # Markdown vault writer
-  index/               # SQLite cache over vault
-  runtime/             # Ollama lifecycle + curated preset catalog
+  write/               # Markdown vault writer (wiki format)
+  runtime/             # Ollama lifecycle + preset catalog + ffmpeg download
 sidecar/               # HTTP API for Electron (FastAPI, port 17890)
 src/                   # Electron + React frontend
 ```
 
-## Models (settings)
+## Build & distribute
 
-Per modality (video / image / audio / article):
+```bash
+# Development
+npm run dev
+
+# Package sidecar (PyInstaller)
+npm run build:sidecar
+
+# Package Electron app
+npm run dist:mac     # → dist/*.dmg
+npm run dist:win     # → dist/*.exe (run on Windows)
+
+# Or push a tag to trigger GitHub Actions CI
+git tag v0.1.0 && git push --tags
+```
+
+### What users need
+
+| Component | How it's handled |
+|-----------|-----------------|
+| Ollama | Downloaded automatically on first launch |
+| ffmpeg | Downloaded automatically on first video |
+| Gemma 4 model | Pull once via Settings → Ollama |
+
+## Models
 
 | Backend | Use case |
 |---------|----------|
-| **Cloud OpenAI-compatible** | OpenRouter, DeepSeek, Moonshot, custom endpoint + API key |
-| **Local Ollama (presets)** | App-managed or system Ollama — **catalog presets only** |
-| **MiMo** | Video, image, audio, article — native API |
-| **Gemini** | Audio — Google AI Studio (up to 9.5h) |
+| **Gemma 4 QAT** | Local inference — video, image, audio, article (recommended) |
+| **OpenAI-compatible** | OpenRouter, DeepSeek, Moonshot, custom endpoint |
+| **MiMo** | Xiaomi's multimodal model — native API |
+| **Gemini** | Audio — Google AI Studio |
 | **Claude** | Image — Anthropic Messages API |
-
-### Local runtime (Ollama)
-
-Two instances, cleanly separated:
-
-| Instance | Port | Binary | Models | Uninstall |
-|----------|------|--------|--------|-----------|
-| **App Ollama** | 11435 | `{appData}/runtime/ollama/` | `{appData}/models/` | Removed with "Delete all data" |
-| **System Ollama** | 11434 | User install (PATH) | User's `~/.ollama` | Never removed by the app |
-
-The app downloads Ollama into its own storage when needed. Presets in `engine/runtime/presets.json` map to `ollama pull` targets (Qwen2.5-VL, Gemma 4, MiniCPM-V, etc.). Only catalog models can be pulled, selected, or deleted from the UI.
-
-Settings → Models:
-
-1. **Download app Ollama** (one-time, into app data)
-2. Pick a **hardware-recommended preset**
-3. **Pull** the preset model
-4. Set inference mode to prefer local / local only
-
-If the user already runs system Ollama, enable **Prefer system Ollama** — the app connects to port 11434 and still only exposes catalog models for pull/delete/select.
 
 ## Export
 
 - **Single note**: reader toolbar → Export Markdown
 - **Whole vault**: Settings → Notes folder → Export all Markdown
 
-## Out of scope (for now)
+## License
 
-Search, Q&A, wikilinks, knowledge graph engine.
+MIT
