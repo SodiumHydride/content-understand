@@ -437,14 +437,18 @@ export async function downloadOllama(): Promise<{
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirm: true })
     })
+    if (!r.ok) {
+      const text = await r.text().catch(() => '')
+      return { ok: false, error: `HTTP ${r.status}: ${text.slice(0, 200)}` }
+    }
     return (await r.json()) as {
       ok: boolean
       status?: 'started' | 'in_progress' | 'already_installed'
       path?: string
       error?: string
     }
-  } catch {
-    return { ok: false, error: 'Request failed' }
+  } catch (e) {
+    return { ok: false, error: `Network error: ${e instanceof Error ? e.message : String(e)}` }
   }
 }
 
@@ -465,6 +469,10 @@ export async function startOllama(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prefer_user: preferUser })
     })
+    if (!r.ok) {
+      const text = await r.text().catch(() => '')
+      return { ok: false, error: `HTTP ${r.status}: ${text.slice(0, 200)}` }
+    }
     return (await r.json()) as {
       ok: boolean
       status?: 'ready' | 'started' | 'in_progress'
@@ -472,8 +480,8 @@ export async function startOllama(
       source?: string
       error?: string
     }
-  } catch {
-    return { ok: false, error: 'Request failed' }
+  } catch (e) {
+    return { ok: false, error: `Network error: ${e instanceof Error ? e.message : String(e)}` }
   }
 }
 
