@@ -65,7 +65,7 @@
   --titlebar-h: 52px;
   --preview-w: min(28rem, 42vw);
   --content-max: 32rem;
-  --reader-measure: 40ch;
+  --reader-measure: 65ch;
   --page-max: 56rem;
   --page-pad-x: clamp(1.5rem, 5vw, 2.5rem);
 
@@ -2168,7 +2168,7 @@ html[data-locale='en'] {
 }
 
 .note-reader-overlay-panel {
-  width: min(36rem, 92vw);
+  width: min(48rem, 92vw);
   max-height: min(88vh, 52rem);
   overflow: hidden;
   border-radius: var(--radius-lg);

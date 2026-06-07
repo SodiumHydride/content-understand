@@ -8,7 +8,7 @@ export function getReaderPresentation(
   mapMode: MapMode
 ): ReaderPresentation {
   if (viewMode === 'journal') return 'sidebar'
-  if (viewMode === 'map' && mapMode === 'wiki') return 'center'
-  if (viewMode === 'vault' || viewMode === 'map') return 'overlay'
+  // Map and vault views use centered modal for comfortable reading
+  if (viewMode === 'map' || viewMode === 'vault') return 'center'
   return 'sidebar'
 }

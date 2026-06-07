@@ -892,7 +892,16 @@ def get_page(slug: str):
     md_path = _safe_md_path(slug)
     if not md_path.exists():
         raise HTTPException(404, "not found")
-    body = md_path.read_text(encoding="utf-8")
+    raw = md_path.read_text(encoding="utf-8")
+    # Strip frontmatter so save_page doesn't duplicate it
+    if raw.startswith("---"):
+        parts = raw.split("---", 2)
+        if len(parts) >= 3:
+            body = parts[2].lstrip("\n")
+        else:
+            body = raw
+    else:
+        body = raw
     return {
         "slug": slug,
         "path": f"{slug}.md",
@@ -924,19 +933,17 @@ def search_notes(q: str = "", limit: int = 20):
         return {"results": []}
 
     conn = open_db(vp)
-    try:
-        # Tokenize query with jieba for better Chinese matching
-        tokens = " ".join(jieba.cut(q))
-        results = fts_search(conn, tokens, limit=limit)
-        return {"results": results}
-    finally:
-        conn.close()
+    # Tokenize query with jieba for better Chinese matching
+    tokens = " ".join(jieba.cut(q))
+    results = fts_search(conn, tokens, limit=limit)
+    return {"results": results}
 
 
 @app.put("/v1/pages/{slug:path}")
 def save_page(slug: str, body: dict):
-    from engine.index.db import fts_rebuild, open_db, upsert_page
-    from engine.index.rebuild import upsert_single_file
+    import hashlib
+
+    from engine.index.db import fts_rebuild, open_db
     from engine.paths import vault_dir
 
     vp = vault_dir()
@@ -956,7 +963,6 @@ def save_page(slug: str, body: dict):
             raise HTTPException(404, "Page not found")
 
         page_path = row[0]
-        page_title = row[1]
 
         # Read existing file to preserve frontmatter
         md_path = vp / page_path
@@ -976,17 +982,26 @@ def save_page(slug: str, body: dict):
             frontmatter = ""
 
         # Write new content
-        md_path.write_text(frontmatter + new_body, encoding="utf-8")
+        full_content = frontmatter + new_body
+        md_path.write_text(full_content, encoding="utf-8")
 
-        # Re-index this file
-        upsert_single_file(vp, md_path)
+        # Update DB metadata (body, body_hash, mtime) WITHOUT touching links
+        body_hash = hashlib.sha256(new_body.encode()).hexdigest()[:16]
+        file_mtime = md_path.stat().st_mtime
+        from datetime import datetime
+
+        conn.execute(
+            "UPDATE pages SET body=?, body_hash=?, file_mtime=?, updated=? WHERE slug=?",
+            (new_body, body_hash, file_mtime, datetime.now().isoformat(), slug),
+        )
+        conn.commit()
 
         # Rebuild FTS
         fts_rebuild(conn)
 
         return {"ok": True}
     finally:
-        conn.close()
+        pass  # Don't close pooled connection
 
 
 @app.get("/v1/export/{slug:path}")
@@ -1006,11 +1021,8 @@ def get_backlinks(slug: str):
     if not db_path.exists():
         return {"backlinks": []}
     conn = open_db(vp)
-    try:
-        rows = get_backlinks(conn, slug)
-        return {"backlinks": rows}
-    finally:
-        conn.close()
+    rows = get_backlinks(conn, slug)
+    return {"backlinks": rows}
 
 
 class CreateLinkPayload(BaseModel):
@@ -1029,29 +1041,26 @@ def create_link(body: CreateLinkPayload):
         raise HTTPException(404, "Index not found")
 
     conn = open_db(vp)
-    try:
-        # Get both titles
-        rows = conn.execute(
-            "SELECT slug, title FROM pages WHERE slug IN (?, ?)",
-            (body.source_slug, body.target_slug),
-        ).fetchall()
-        title_map = {r[0]: r[1] for r in rows}
-        source_title = title_map.get(body.source_slug, body.source_slug)
-        target_title = title_map.get(body.target_slug, body.target_slug)
+    # Get both titles
+    rows = conn.execute(
+        "SELECT slug, title FROM pages WHERE slug IN (?, ?)",
+        (body.source_slug, body.target_slug),
+    ).fetchall()
+    title_map = {r[0]: r[1] for r in rows}
+    source_title = title_map.get(body.source_slug, body.source_slug)
+    target_title = title_map.get(body.target_slug, body.target_slug)
 
-        # A -> B
-        upsert_link(conn, body.source_slug, body.target_slug, f"[[{target_title}]]")
-        # B -> A (bidirectional)
-        upsert_link(conn, body.target_slug, body.source_slug, f"[[{source_title}]]")
-        conn.commit()
+    # A -> B
+    upsert_link(conn, body.source_slug, body.target_slug, f"[[{target_title}]]")
+    # B -> A (bidirectional)
+    upsert_link(conn, body.target_slug, body.source_slug, f"[[{source_title}]]")
+    conn.commit()
 
-        # Append wikilinks to both markdown files
-        _append_wikilink_to_file(vp, body.source_slug, target_title)
-        _append_wikilink_to_file(vp, body.target_slug, source_title)
+    # Append wikilinks to both markdown files
+    _append_wikilink_to_file(vp, body.source_slug, target_title)
+    _append_wikilink_to_file(vp, body.target_slug, source_title)
 
-        return {"ok": True}
-    finally:
-        conn.close()
+    return {"ok": True}
 
 
 def _append_wikilink_to_file(vp: Path, source_slug: str, target_title: str) -> None:
@@ -1103,41 +1112,38 @@ def delete_page(slug: str):
         raise HTTPException(404, "Index not found")
 
     conn = open_db(vp)
+    # Get the page info
+    row = conn.execute("SELECT path, title FROM pages WHERE slug=?", (slug,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Page not found")
+
+    page_path = row[0]
+    page_title = row[1]
+
+    # Delete outgoing links
+    delete_links_for_source(conn, slug)
+
+    # Delete incoming links (other pages linking to this one)
+    conn.execute("DELETE FROM links WHERE target_slug=?", (slug,))
+    conn.commit()
+
+    # Delete from pages table
+    conn.execute("DELETE FROM pages WHERE slug=?", (slug,))
+    conn.commit()
+
+    # Delete the actual file
+    file_path = vp / page_path
     try:
-        # Get the page info
-        row = conn.execute("SELECT path, title FROM pages WHERE slug=?", (slug,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Page not found")
+        resolved = file_path.resolve()
+        if resolved.exists() and resolved.is_relative_to(vp.resolve()):
+            resolved.unlink()
+    except OSError:
+        pass
 
-        page_path = row[0]
-        page_title = row[1]
+    # Clean up wikilinks referencing this page from other markdown files
+    _cleanup_wikilinks_for_deleted(vp, page_title, conn)
 
-        # Delete outgoing links
-        delete_links_for_source(conn, slug)
-
-        # Delete incoming links (other pages linking to this one)
-        conn.execute("DELETE FROM links WHERE target_slug=?", (slug,))
-        conn.commit()
-
-        # Delete from pages table
-        conn.execute("DELETE FROM pages WHERE slug=?", (slug,))
-        conn.commit()
-
-        # Delete the actual file
-        file_path = vp / page_path
-        try:
-            resolved = file_path.resolve()
-            if resolved.exists() and resolved.is_relative_to(vp.resolve()):
-                resolved.unlink()
-        except OSError:
-            pass
-
-        # Clean up wikilinks referencing this page from other markdown files
-        _cleanup_wikilinks_for_deleted(vp, page_title, conn)
-
-        return {"ok": True, "deleted": slug}
-    finally:
-        conn.close()
+    return {"ok": True, "deleted": slug}
 
 
 @app.get("/v1/pages/{slug:path}/ink")
@@ -1148,13 +1154,10 @@ def get_note_ink(slug: str):
         return {"strokes": []}
 
     conn = open_db(vp)
-    try:
-        row = conn.execute("SELECT path FROM pages WHERE slug=?", (slug,)).fetchone()
-        if not row:
-            return {"strokes": []}
-        page_path = row[0]
-    finally:
-        conn.close()
+    row = conn.execute("SELECT path FROM pages WHERE slug=?", (slug,)).fetchone()
+    if not row:
+        return {"strokes": []}
+    page_path = row[0]
 
     md_path = vp / page_path
     ink_path = md_path.with_suffix('.ink.json')
@@ -1177,13 +1180,10 @@ def save_note_ink(slug: str, body: dict):
         raise HTTPException(404, "Index not found")
 
     conn = open_db(vp)
-    try:
-        row = conn.execute("SELECT path FROM pages WHERE slug=?", (slug,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Page not found")
-        page_path = row[0]
-    finally:
-        conn.close()
+    row = conn.execute("SELECT path FROM pages WHERE slug=?", (slug,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Page not found")
+    page_path = row[0]
 
     md_path = vp / page_path
     ink_path = md_path.with_suffix('.ink.json')
@@ -1206,25 +1206,22 @@ def get_graph():
     if not db_path.exists():
         return {"nodes": [], "edges": []}
     conn = open_db(vp)
-    try:
-        # Get all pages as nodes
-        rows = conn.execute(
-            "SELECT slug, title, type, summary, tags FROM pages"
-        ).fetchall()
-        nodes = []
-        for r in rows:
-            nodes.append({
-                "slug": r[0],
-                "title": r[1],
-                "type": r[2],
-                "summary": r[3],
-                "tags": json.loads(r[4]) if r[4] else [],
-            })
-        # Get all links as edges
-        edges = get_all_links(conn)
-        return {"nodes": nodes, "edges": edges}
-    finally:
-        conn.close()
+    # Get all pages as nodes
+    rows = conn.execute(
+        "SELECT slug, title, type, summary, tags FROM pages"
+    ).fetchall()
+    nodes = []
+    for r in rows:
+        nodes.append({
+            "slug": r[0],
+            "title": r[1],
+            "type": r[2],
+            "summary": r[3],
+            "tags": json.loads(r[4]) if r[4] else [],
+        })
+    # Get all links as edges
+    edges = get_all_links(conn)
+    return {"nodes": nodes, "edges": edges}
 
 
 @app.post("/v1/ingest")

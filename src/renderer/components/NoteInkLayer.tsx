@@ -1,8 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CanvasPoint, StrokeStyle, ThinkingStrokeElement } from '../lib/thinkingCanvas/types'
 import { applyEraser } from '../lib/thinkingCanvas/strokeGeometry'
-import { ThinkingCanvasInk } from './thinkingCanvas/ThinkingCanvasInk'
 import { fetchNoteInk, saveNoteInk } from '../lib/sidecar'
+
+// ── Smooth path for handwriting ──
+
+function smoothPathD(points: CanvasPoint[]): string {
+  if (points.length === 0) return ''
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`
+  if (points.length === 2)
+    return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`
+
+  let d = `M ${points[0].x} ${points[0].y}`
+  for (let i = 1; i < points.length - 1; i++) {
+    const midX = (points[i].x + points[i + 1].x) / 2
+    const midY = (points[i].y + points[i + 1].y) / 2
+    d += ` Q ${points[i].x} ${points[i].y} ${midX} ${midY}`
+  }
+  const last = points[points.length - 1]
+  d += ` L ${last.x} ${last.y}`
+  return d
+}
 
 // ── Helpers ──
 
@@ -338,7 +356,33 @@ export function NoteInkLayer({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      <ThinkingCanvasInk strokes={strokes} activeStroke={activeStroke} />
+      {strokes.map((stroke) => (
+        <path
+          key={stroke.id}
+          d={smoothPathD(stroke.points)}
+          fill="none"
+          stroke={stroke.style.color}
+          strokeWidth={stroke.style.width}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={stroke.style.variant === 'highlighter' ? stroke.style.opacity : 1}
+        />
+      ))}
+      {activeStroke && (
+        <path
+          d={smoothPathD(activeStroke.points)}
+          fill="none"
+          stroke={activeStroke.style.color}
+          strokeWidth={activeStroke.style.width}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity={
+            activeStroke.style.variant === 'highlighter'
+              ? activeStroke.style.opacity
+              : 1
+          }
+        />
+      )}
     </svg>
   )
 }
