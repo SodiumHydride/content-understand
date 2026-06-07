@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import type { AppLocale } from '../lib/i18n'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { rebuildIndex, exportCookies } from '../lib/sidecar'
 import type { InferenceMode } from '../stores/types'
 import { Select, type SelectOption } from './Select'
@@ -33,6 +33,43 @@ export function SettingsModal(): React.JSX.Element | null {
   const [tab, setTab] = useState<SettingsTab>('general')
   const [savedFlash, setSavedFlash] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Focus trap + Escape handler
+  useEffect(() => {
+    if (!open) return
+    const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    const panel = document.querySelector('.modal-panel.settings-shell')
+    if (!panel) return
+    const elements = (Array.from(panel.querySelectorAll(FOCUSABLE)) as HTMLElement[])
+      .filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
+    if (elements.length > 0) {
+      setTimeout(() => elements[0].focus(), 0)
+    }
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setSettingsOpen(false)
+        return
+      }
+      if (e.key !== 'Tab' || elements.length === 0) return
+      const first = elements[0]
+      const last = elements[elements.length - 1]
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [open, setSettingsOpen])
+
   if (!open) return null
 
   const save = (): void => {
@@ -61,7 +98,7 @@ export function SettingsModal(): React.JSX.Element | null {
       return
     }
     save()
-    setSettingsOpen(false)
+    setTimeout(() => setSettingsOpen(false), 800)
   }
 
   // Ordered provider list for display
@@ -296,6 +333,26 @@ export function SettingsModal(): React.JSX.Element | null {
                         frameSettings: { ...settings.frameSettings, scale: v }
                       })}
                     />
+                  </Field>
+
+                  <Field label={isZh ? '上下文大小 (num_ctx)' : 'Context Size (num_ctx)'}>
+                    <Select
+                      value={String(settings.frameSettings?.numCtx ?? 16384)}
+                      options={[
+                        { value: '4096', label: '4K' },
+                        { value: '8192', label: '8K' },
+                        { value: '16384', label: '16K (Recommended)' },
+                        { value: '32768', label: '32K' },
+                        { value: '65536', label: '64K' },
+                        { value: '131072', label: '128K' },
+                      ]}
+                      onChange={(v) => updateSettings({
+                        frameSettings: { ...settings.frameSettings, numCtx: parseInt(v) }
+                      })}
+                    />
+                    <p className="mt-1 text-[10px] text-ink-500">
+                      {isZh ? 'Gemma4 支持 256K，但 16K 足够 30 秒视频。越大越慢。' : 'Gemma4 supports 256K, but 16K is enough for 30s segments. Larger = slower.'}
+                    </p>
                   </Field>
 
                   <Field label={isZh ? '音频分离' : 'Audio Extraction'}>

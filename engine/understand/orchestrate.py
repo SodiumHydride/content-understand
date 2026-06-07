@@ -69,18 +69,8 @@ def _ensure_local_ready(
 
 
 def detect_kind(path: Path) -> str:
-    mime, _ = mimetypes.guess_type(str(path))
-    if not mime:
-        return "article"
-    if mime.startswith("video/"):
-        return "video"
-    if mime.startswith("image/"):
-        return "image"
-    if mime.startswith("audio/"):
-        return "audio"
-    if mime in ("text/html", "application/pdf", "text/plain"):
-        return "article"
-    return "article"
+    from content_understand.pipeline import _detect_content_type
+    return _detect_content_type(str(path))
 
 
 def _build_pipeline(config: ContentConfig, on_progress: ProgressFn | None = None):
@@ -132,6 +122,7 @@ def _build_pipeline(config: ContentConfig, on_progress: ProgressFn | None = None
         "max_frames": config.frame_max_frames,
         "scale": config.frame_scale,
         "strategy": config.frame_strategy,
+        "num_ctx": config.frame_num_ctx,
     }
     for bc in backends.values():
         bc.extra = {**frame_extra, **bc.extra}
@@ -143,6 +134,7 @@ def _build_pipeline(config: ContentConfig, on_progress: ProgressFn | None = None
         audio_backend=config.audio_backend,
         article_backend=config.article_backend,
         cache_dir=config.cache_dir,
+        cache_max_age_seconds=config.cache_max_age_seconds,
         bilibili_cookies=config.bilibili_cookies,
         output_language=config.output_language,
         prompt_template=config.prompt_template,

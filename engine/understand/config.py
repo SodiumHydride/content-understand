@@ -38,8 +38,7 @@ class ContentConfig(BaseModel):
     frame_max_frames: int = 30
     frame_scale: str = ""
     frame_strategy: str = "uniform"
-    audio_extract_enabled: bool = True
-    audio_sample_rate: int = 16000
+    frame_num_ctx: int = 16384  # Ollama context size for local models
 
     def get_backend(self, name: str) -> BackendConfig:
         if name in self.backends:

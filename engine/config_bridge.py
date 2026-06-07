@@ -166,8 +166,7 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
         frame_max_frames=int(frame_settings.get("maxFrames", 30)),
         frame_scale=str(frame_settings.get("scale", "")),
         frame_strategy=str(frame_settings.get("strategy", "uniform")),
-        audio_extract_enabled=bool(audio_settings.get("enabled", True)),
-        audio_sample_rate=int(audio_settings.get("sampleRate", 16000)),
+        frame_num_ctx=int(frame_settings.get("numCtx", 16384)),
     )
 
 
@@ -338,10 +337,30 @@ def _apply_local_modality_models(local_bc: BackendConfig, rt) -> None:
 
     User-set models (persisted in state.json) take priority over preset
     defaults, so manually configured non-preset models survive preset changes.
+    Validates that the chosen model is actually installed in Ollama.
     """
+    import logging
+
+    import requests
+
     from engine.runtime.state import get_modality_models
 
+    logger = logging.getLogger(__name__)
+
     persisted = get_modality_models()
+
+    # Fetch installed models from Ollama for validation
+    installed_models: set[str] = set()
+    if local_bc.api_base:
+        try:
+            r = requests.get(
+                f"{local_bc.api_base.rstrip('/')}/models", timeout=5
+            )
+            if r.status_code == 200:
+                for m in r.json().get("data", []):
+                    installed_models.add(m.get("id", ""))
+        except Exception:
+            pass
 
     for modality, attr in (
         ("video", "model"),
@@ -356,6 +375,15 @@ def _apply_local_modality_models(local_bc: BackendConfig, rt) -> None:
         value = user_val or resolved
         if not value:
             continue
+
+        # Validate model is installed (warn but don't block)
+        if installed_models and value not in installed_models:
+            logger.warning(
+                "Model '%s' for %s is not installed in Ollama. "
+                "Available: %s. The request will likely fail with 404.",
+                value, modality, ", ".join(sorted(installed_models)) or "(none)",
+            )
+
         if modality == "article" and attr == "model":
             # article only sets model if video didn't already set it
             if not local_bc.model:

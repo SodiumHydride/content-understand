@@ -78,6 +78,24 @@ def _load_class(module_path: str, class_name: str):
     return getattr(module, class_name)
 
 
+# Model name patterns → ContentModel backend keys
+_MODEL_NAME_PATTERNS: list[tuple[str, str]] = [
+    ("gemma4", "gemma4"),
+    ("gemma3", "gemma4"),  # Gemma 3 uses same backend as Gemma 4
+    ("qwen2.5-omni", "qwen_omni"),
+    ("qwen_omni", "qwen_omni"),
+]
+
+
+def _resolve_backend_by_model_name(model_name: str) -> str | None:
+    """Resolve a model name (e.g. 'gemma4:12b-it-qat') to a ContentModel backend key."""
+    lower = model_name.lower()
+    for pattern, backend in _MODEL_NAME_PATTERNS:
+        if pattern in lower:
+            return backend
+    return None
+
+
 def create_video_model(backend_name: str, config: BackendConfig) -> VideoModel:
     """Instantiate a VideoModel by backend name."""
     if backend_name not in _VIDEO_BACKENDS:
@@ -146,20 +164,25 @@ def create_content_model(backend_name: str, config: BackendConfig) -> ContentMod
     This is the preferred way to create models in the new pipeline.
     Falls back to legacy per-modality models wrapped in adapters.
     """
-    if backend_name in _CONTENT_MODELS:
-        module_path, class_name = _CONTENT_MODELS[backend_name]
+    # Model-name-based routing: if the model name matches a known ContentModel,
+    # use it regardless of backend_name (e.g. gemma4 model on local_server).
+    model_name = getattr(config, "model", "") or ""
+    resolved_name = _resolve_backend_by_model_name(model_name) or backend_name
+
+    if resolved_name in _CONTENT_MODELS:
+        module_path, class_name = _CONTENT_MODELS[resolved_name]
         try:
             cls = _load_class(module_path, class_name)
             return cls(config)
         except (ImportError, ModuleNotFoundError) as e:
             raise NotImplementedError(
-                f"Content model backend '{backend_name}' not available: {e}"
+                f"Content model backend '{resolved_name}' not available: {e}"
             ) from None
 
     # Fallback: try to wrap legacy backends
     known = ", ".join(sorted(_CONTENT_MODELS))
     raise ValueError(
-        f"Unknown content model backend '{backend_name}'. Known: {known}"
+        f"Unknown content model backend '{resolved_name}'. Known: {known}"
     )
 
 

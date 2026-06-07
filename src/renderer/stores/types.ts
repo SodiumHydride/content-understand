@@ -136,6 +136,7 @@ export interface FrameSettings {
   maxFrames: number     // 10 ~ 100, default 30
   scale: string         // "" (original) | "512:-2" | "720:-2"
   strategy: 'uniform' | 'keyframe'  // default 'uniform'
+  numCtx: number        // Ollama context size, default 16384
 }
 
 /** Audio extraction from video settings. */

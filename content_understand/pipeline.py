@@ -5,6 +5,7 @@ Orchestrates: resolve → extract/understand → return structured result.
 
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 import re
@@ -35,23 +36,37 @@ logger = logging.getLogger(__name__)
 
 ProgressFn = Callable[[str, int, str], None]
 
+
+def _encode_file_base64(path: str) -> str | None:
+    """Encode a file to base64 string."""
+    import base64
+    try:
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return None
+
 _DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
     "video": {
         "zh": (
             "请详细分析这段视频，按以下结构输出：\n\n"
-            "## 摘要\n用 2-3 句话概括视频主旨\n\n"
-            "## 要点\n- 列出核心要点（3-8 条）\n\n"
-            "## 详细内容\n按时间线或主题分段展开\n\n"
-            "## 标签\n给出 5-10 个相关标签，格式：#标签1 #标签2 ...\n\n"
-            "## 总结\n用 2-3 句话总结核心价值"
+            "## 摘要\n- 用 3-5 句话概括视频的核心内容和价值\n\n"
+            "## 时间线\n- MM:SS - MM:SS  内容概述（按视频内容分段，每段标明起止时间）\n\n"
+            "## 关键场景/节点\n- 列出视频中的关键时间点和重要场景（5-10 个）\n\n"
+            "## 要点\n- 列出视频的核心要点（5-10 条）\n\n"
+            "## 详细内容\n- 按时间线各段展开详细说明\n- 每段包含：核心观点、支撑论据、关键数据（如有）\n\n"
+            "## 标签\n- 给出 8-15 个相关标签，格式：#标签1 #标签2 ...\n\n"
+            "## 总结\n- 用 3-5 句话总结视频主旨和核心价值"
         ),
         "en": (
             "Analyze this video in detail, output in the following structure:\n\n"
-            "## Summary\nSummarize the main point in 2-3 sentences\n\n"
-            "## Key Points\n- List core points (3-8 items)\n\n"
-            "## Detailed Content\nExpand by timeline or theme\n\n"
-            "## Tags\nGive 5-10 relevant tags, format: #tag1 #tag2 ...\n\n"
-            "## Conclusion\nSummarize core value in 2-3 sentences"
+            "## Summary\n- Summarize the core content and value in 3-5 sentences\n\n"
+            "## Timeline\n- MM:SS - MM:SS  Content overview (segment by video content, mark start/end times)\n\n"
+            "## Key Scenes/Nodes\n- List key timestamps and important scenes (5-10 items)\n\n"
+            "## Key Points\n- List core points (5-10 items)\n\n"
+            "## Detailed Content\n- Expand each timeline segment in detail\n- Each segment includes: core viewpoint, supporting arguments, key data (if any)\n\n"
+            "## Tags\n- Give 8-15 relevant tags, format: #tag1 #tag2 ...\n\n"
+            "## Conclusion\n- Summarize the video's main message and core value in 3-5 sentences"
         ),
     },
     "image": {
@@ -132,7 +147,7 @@ def _detect_content_type(path: str) -> str:
         mime = _EXTRA.get(ext)
 
     if not mime:
-        return "article"
+        return "unknown"
     if mime.startswith("video/"):
         return "video"
     if mime.startswith("image/"):
@@ -141,7 +156,7 @@ def _detect_content_type(path: str) -> str:
         return "audio"
     if mime in ("text/html", "application/pdf", "text/plain"):
         return "article"
-    return "article"
+    return "unknown"
 
 
 def _extract_tags(text: str) -> list[str]:
@@ -203,7 +218,7 @@ class ContentPipeline:
 
     def understand(
         self,
-        input: str,
+        source: str,
         *,
         content_type: str | None = None,
         prompt: str | None = None,
@@ -213,7 +228,7 @@ class ContentPipeline:
         """Understand content from a URL or local file path.
 
         Args:
-            input: URL or local file path.
+            source: URL or local file path.
             content_type: Override auto-detection ("video", "image", "audio", "article").
             prompt: Custom prompt for the model.
             on_progress: Progress callback (stage, percent, message).
@@ -235,7 +250,7 @@ class ContentPipeline:
             "timeout": self.config.http_timeout,
         }
 
-        resolve_result = self.resolver_chain.resolve(input, ctx)
+        resolve_result = self.resolver_chain.resolve(source, ctx)
 
         if on_progress:
             on_progress("download", 30, "Downloaded")
@@ -299,6 +314,10 @@ class ContentPipeline:
         local_path = resolve_result.local_path
         backend_name, backend_config = self.config.backend_for_content_type(content_type)
 
+        if content_type == "unknown":
+            logger.warning("Unknown content type for %s, attempting article extraction", local_path)
+            content_type = "article"
+
         # Prompt priority: user custom > config template > language-aware default
         lang = getattr(self.config, "output_language", "zh") or "zh"
         if prompt:
@@ -308,6 +327,13 @@ class ContentPipeline:
         else:
             defaults = _DEFAULT_PROMPTS.get(content_type, {})
             effective_prompt = defaults.get(lang, defaults.get("zh", ""))
+
+        # Format article template variables before passing to any model path
+        if content_type == "article" and effective_prompt and "{text}" in effective_prompt:
+            text = self._extract_text(local_path, resolve_result)
+            title = resolve_result.metadata.get("title", "")
+            url = resolve_result.original_url
+            effective_prompt = effective_prompt.format(title=title, url=url, text=text)
 
         # Try new ContentModel path first
         if has_content_model(backend_name):
@@ -327,7 +353,8 @@ class ContentPipeline:
         try:
             if content_type == "video":
                 return self._understand_video(
-                    local_path, backend_name, backend_config, effective_prompt, on_progress, lang
+                    local_path, backend_name, backend_config, effective_prompt, on_progress, lang,
+                    resolve_result=resolve_result,
                 )
             elif content_type == "image":
                 return self._understand_image(
@@ -341,7 +368,7 @@ class ContentPipeline:
                 return self._understand_article(
                     local_path, resolve_result, backend_name, backend_config, effective_prompt, lang
                 )
-        except (NotImplementedError, ValueError) as exc:
+        except (NotImplementedError, ValueError, ConnectionError, TimeoutError, OSError) as exc:
             logger.warning(
                 "Backend '%s' doesn't support %s (%s), falling back to article",
                 backend_name, content_type, exc,
@@ -382,8 +409,9 @@ class ContentPipeline:
         extra = getattr(backend_config, "extra", {}) or {}
         frame_config = FrameConfig(
             fps=extra.get("fps", caps.default_fps),
-            max_frames=extra.get("max_frames", 30),
+            max_frames=extra.get("max_frames", 500 if content_type == "video" else 30),
             scale=extra.get("scale", caps.default_scale),
+            strategy=extra.get("frame_strategy", "scene_aware" if content_type == "video" else "uniform"),
         )
 
         # Prepare content bundle with capability-aware preprocessing
@@ -411,6 +439,19 @@ class ContentPipeline:
         if on_progress:
             on_progress("model", 50, f"Analyzing with {backend_name}...")
 
+        # Map-Reduce: chunked video understanding for long videos
+        # Skip if model handles segmentation internally (e.g. Gemma4)
+        caps = model.capabilities() if hasattr(model, 'capabilities') else None
+        model_handles_own_segments = caps and caps.supports_native_video
+        if (content_type == "video"
+                and bundle.audio_chunks
+                and len(bundle.audio_chunks) > 1
+                and not model_handles_own_segments):
+            return self._understand_video_chunked(
+                model, bundle, effective_prompt, backend_config,
+                on_progress, language, output_format, json_schema,
+            )
+
         try:
             summary = model.understand(
                 bundle=bundle,
@@ -435,13 +476,226 @@ class ContentPipeline:
             # Model returned parsed dict — validate against schema
             schema_class = get_schema_for_type(content_type)
             validated = validate_or_fallback(
-                __import__("json").dumps(summary, ensure_ascii=False),
+                json.dumps(summary, ensure_ascii=False),
                 schema_class,
                 content_type,
             )
             return {"summary": validated, "tags": validated.get("tags", [])}
 
         return {"summary": summary, "tags": _extract_tags(summary)}
+
+    def _understand_video_chunked(
+        self,
+        model,
+        bundle,
+        prompt: str,
+        config,
+        on_progress: ProgressFn | None,
+        language: str,
+        output_format: str,
+        json_schema: dict | None,
+    ) -> dict[str, Any]:
+        """Map-Reduce video understanding: process chunks in parallel, merge by filling template.
+
+        Each chunk gets its corresponding time-range frames + audio transcript.
+        Results are merged by structural filling (no re-summarization).
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        chunks = bundle.audio_chunks
+        all_timestamps = bundle.frame_timestamps or []
+        n_chunks = len(chunks)
+
+        if on_progress:
+            on_progress("model", 50, f"Processing {n_chunks} video segments...")
+
+        # Split frames into groups per chunk based on timestamp
+        def frames_for_chunk(chunk):
+            return [
+                ft for ft in all_timestamps
+                if chunk.start_seconds <= ft.timestamp_seconds < chunk.end_seconds
+            ]
+
+        # Build per-chunk transcript segments
+        full_transcript = bundle.text or ""
+        transcript_segments = []
+        if full_transcript:
+            # Split transcript roughly by chunk count
+            chunk_len = len(full_transcript) // n_chunks
+            for i in range(n_chunks):
+                start = i * chunk_len
+                end = (i + 1) * chunk_len if i < n_chunks - 1 else len(full_transcript)
+                transcript_segments.append(full_transcript[start:end])
+        else:
+            transcript_segments = [""] * n_chunks
+
+        # Per-chunk analysis prompt
+        chunk_prompt = (
+            f"{prompt}\n\n"
+            "请按以下结构输出：\n"
+            "## 时间线\n- MM:SS - MM:SS  内容概述\n\n"
+            "## 关键场景\n- 列出关键时间点（2-5 个）\n\n"
+            "## 要点\n- 列出核心要点（3-5 条）\n\n"
+            "## 标签\n- 给出 3-5 个标签，格式：#标签1 #标签2"
+        )
+
+        # Process chunks in parallel
+        chunk_results = [None] * n_chunks
+
+        def process_chunk(idx, chunk):
+            chunk_frames = frames_for_chunk(chunk)
+            chunk_transcript = transcript_segments[idx]
+
+            # Build mini-content for this chunk
+            content = []
+            for ft in chunk_frames:
+                content.append({"type": "text", "text": f"[{ft.mmss}]"})
+                b64 = _encode_file_base64(str(ft.path))
+                if b64:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                    })
+
+            if chunk_transcript:
+                content.append({"type": "text", "text": f"[音频转录 {chunk.mmss_range}]\n{chunk_transcript}"})
+
+            content.append({"type": "text", "text": chunk_prompt})
+
+            # Call model directly via the chat method
+            try:
+                result = model._chat(content, config.timeout, "text", None)
+                return idx, result
+            except Exception as e:
+                logger.warning("Chunk %d (%s) failed: %s", idx, chunk.mmss_range, e)
+                return idx, None
+
+        with ThreadPoolExecutor(max_workers=min(3, n_chunks)) as executor:
+            futures = [
+                executor.submit(process_chunk, i, chunk)
+                for i, chunk in enumerate(chunks)
+            ]
+            for future in as_completed(futures):
+                idx, result = future.result()
+                chunk_results[idx] = result
+                if on_progress:
+                    pct = 50 + int(40 * (idx + 1) / n_chunks)
+                    on_progress("model", pct, f"Segment {idx + 1}/{n_chunks} done")
+
+        # Merge results by structural filling (no re-summarization)
+        valid_results = [r for r in chunk_results if r]
+        if not valid_results:
+            return {"summary": "视频理解失败：所有分段均未返回结果。", "tags": []}
+
+        merged = self._merge_chunk_results(valid_results, language)
+
+        if on_progress:
+            on_progress("done", 100, "Complete")
+
+        return merged
+
+    def _merge_chunk_results(self, results: list[str], language: str) -> dict[str, Any]:
+        """Merge chunk analyses by structural filling — no re-summarization.
+
+        Extracts structured sections from each chunk and assembles them.
+        """
+        import re as re_mod
+
+        # Collect all sections from all chunks
+        all_timelines = []
+        all_scenes = []
+        all_points = []
+        all_tags = []
+        summaries = []
+
+        for result in results:
+            if not result:
+                continue
+
+            # Extract timeline entries
+            tl_match = re_mod.search(
+                r"#+\s*(?:时间线|Timeline)\s*\n(.*?)(?=\n#|\Z)", result, re_mod.DOTALL
+            )
+            if tl_match:
+                entries = [
+                    line.strip() for line in tl_match.group(1).strip().split("\n")
+                    if line.strip() and line.strip().startswith("-")
+                ]
+                all_timelines.extend(entries)
+
+            # Extract key scenes
+            scene_match = re_mod.search(
+                r"#+\s*(?:关键场景|Key Scene)[^\n]*\n(.*?)(?=\n#|\Z)", result, re_mod.DOTALL
+            )
+            if scene_match:
+                entries = [
+                    line.strip() for line in scene_match.group(1).strip().split("\n")
+                    if line.strip() and (line.strip().startswith("-") or line.strip().startswith("*") or re_mod.match(r"^\d+\.", line.strip()))
+                ]
+                all_scenes.extend(entries)
+
+            # Extract key points
+            points_match = re_mod.search(
+                r"#+\s*(?:要点|Key Point)[^\n]*\n(.*?)(?=\n#|\Z)", result, re_mod.DOTALL
+            )
+            if points_match:
+                entries = [
+                    line.strip() for line in points_match.group(1).strip().split("\n")
+                    if line.strip() and (line.strip().startswith("-") or line.strip().startswith("*") or re_mod.match(r"^\d+\.", line.strip()))
+                ]
+                all_points.extend(entries)
+
+            # Extract tags
+            tags = re_mod.findall(r"#([\w一-鿿][\w一-鿿_-]*)", result)
+            all_tags.extend(tags)
+
+            # Extract summary (first paragraph or ## 摘要 section)
+            sum_match = re_mod.search(
+                r"#+\s*(?:摘要|Summary)\s*\n(.*?)(?=\n#|\Z)", result, re_mod.DOTALL
+            )
+            if sum_match:
+                summaries.append(sum_match.group(1).strip()[:500])
+            elif not summaries:
+                # Use first non-empty paragraph as summary
+                for line in result.split("\n"):
+                    line = line.strip()
+                    if line and not line.startswith("#") and not line.startswith("-"):
+                        summaries.append(line[:500])
+                        break
+
+        # Deduplicate
+        seen_tags = set()
+        unique_tags = []
+        for tag in all_tags:
+            if tag.lower() not in seen_tags:
+                seen_tags.add(tag.lower())
+                unique_tags.append(tag)
+
+        # Build merged output
+        summary_text = summaries[0] if summaries else ""
+
+        timeline_text = "\n".join(all_timelines) if all_timelines else ""
+        scenes_text = "\n".join(all_scenes) if all_scenes else ""
+        points_text = "\n".join(all_points) if all_points else ""
+
+        merged_parts = []
+        if summary_text:
+            merged_parts.append(f"## 摘要\n{summary_text}")
+        if timeline_text:
+            merged_parts.append(f"## 时间线\n{timeline_text}")
+        if scenes_text:
+            merged_parts.append(f"## 关键场景\n{scenes_text}")
+        if points_text:
+            merged_parts.append(f"## 要点\n{points_text}")
+        if unique_tags:
+            merged_parts.append(f"## 标签\n{' '.join('#' + t for t in unique_tags[:15])}")
+
+        merged_summary = "\n\n".join(merged_parts) if merged_parts else results[0]
+
+        return {
+            "summary": merged_summary,
+            "tags": unique_tags[:15],
+        }
 
     def _understand_video(
         self,
@@ -451,8 +705,30 @@ class ContentPipeline:
         prompt: str,
         on_progress: ProgressFn | None,
         language: str = "zh",
+        resolve_result: ResolveResult | None = None,
     ) -> dict[str, Any]:
         model = create_video_model(backend_name, config)
+
+        # Prepend video metadata to prompt (like MiMo system does)
+        if resolve_result and resolve_result.metadata:
+            meta = resolve_result.metadata
+            title = meta.get("title", "")
+            author = meta.get("author", "")
+            duration = meta.get("duration", "")
+            platform = meta.get("platform", "")
+            if title or author or duration:
+                context_parts = []
+                if title:
+                    context_parts.append(f"标题：{title}")
+                if author:
+                    context_parts.append(f"作者：{author}")
+                if duration:
+                    context_parts.append(f"时长：{duration}")
+                if platform:
+                    context_parts.append(f"平台：{platform}")
+                context_line = "（".join(context_parts) + "）" if context_parts else ""
+                if context_line:
+                    prompt = f"视频{context_line}\n\n{prompt}"
 
         if on_progress:
             on_progress("model", 50, f"Analyzing video with {backend_name}...")
@@ -528,12 +804,17 @@ class ContentPipeline:
         # Extract text from the content
         text = self._extract_text(path, resolve_result)
         if not text:
-            return {"summary": "Could not extract text content.", "tags": []}
+            msg = "无法提取文本内容。" if language == "zh" else "Could not extract text content."
+            return {"summary": msg, "tags": []}
 
         model = create_article_model(backend_name, config)
 
         title = resolve_result.metadata.get("title", "")
         url = resolve_result.original_url
+
+        # Format template variables if prompt contains them
+        if prompt and ("{text}" in prompt or "{title}" in prompt):
+            prompt = prompt.format(title=title, url=url, text=text)
 
         summary = model.understand_article(
             text=text,
