@@ -9,7 +9,6 @@ import json
 import logging
 import os
 import platform
-import signal
 import sys
 import threading
 import uuid
@@ -126,13 +125,6 @@ def _cleanup_runtime() -> None:
         logger.debug("PID file cleanup failed: %s", exc)
 
 
-def _signal_handler(signum: int, frame: Any) -> None:
-    sig_name = signal.Signals(signum).name
-    logger.info("Received %s — shutting down", sig_name)
-    _cleanup_runtime()
-    sys.exit(0)
-
-
 def _handle_old_instance(port: int) -> None:
     """Check for a stale sidecar PID file and port conflict, resolve them."""
     pid_path = _pid_file_path()
@@ -163,17 +155,6 @@ def _handle_old_instance(port: int) -> None:
     if not cleanup_stale_port(port):
         logger.error("Port %d is occupied and cannot be freed — exiting", port)
         sys.exit(1)
-
-
-def _register_signal_handlers() -> None:
-    """Register SIGTERM/SIGINT. On Windows, fall back to atexit only."""
-    if _IS_WINDOWS:
-        # Windows has limited signal support; atexit is the primary path
-        logger.debug("Windows detected — using atexit as primary cleanup")
-        return
-    signal.signal(signal.SIGTERM, _signal_handler)
-    signal.signal(signal.SIGINT, _signal_handler)
-    logger.debug("Registered SIGTERM/SIGINT handlers")
 
 
 @asynccontextmanager

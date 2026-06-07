@@ -66,17 +66,35 @@ async function killOccupyingProcess(): Promise<void> {
     return
   }
 
-  // Force kill via lsof
+  // Force kill — platform-specific
   console.log('[main] port still occupied — force killing')
   try {
-    const pids = execFileSync('lsof', ['-ti', `:${SIDECAR_PORT}`], { encoding: 'utf-8' }).trim()
-    for (const pid of pids.split('\n').filter(Boolean)) {
-      try {
-        process.kill(Number(pid), 'SIGKILL')
-        console.log('[main] killed stale PID %s', pid)
-      } catch { /* already gone */ }
+    if (process.platform === 'win32') {
+      // Windows: use netstat to find PID, then taskkill
+      const netstat = execFileSync('netstat', ['-ano'], { encoding: 'utf-8' })
+      for (const line of netstat.split('\n')) {
+        const parts = line.trim().split(/\s+/)
+        if (parts.length >= 5 && parts[0] === 'TCP' && parts[3] === 'LISTENING') {
+          const local = parts[1]
+          if (local.endsWith(`:${SIDECAR_PORT}`)) {
+            const pid = parts[4]
+            try {
+              execFileSync('taskkill', ['/F', '/PID', pid], { stdio: 'ignore' })
+              console.log('[main] killed stale PID %s', pid)
+            } catch { /* already gone */ }
+          }
+        }
+      }
+    } else {
+      const pids = execFileSync('lsof', ['-ti', `:${SIDECAR_PORT}`], { encoding: 'utf-8' }).trim()
+      for (const pid of pids.split('\n').filter(Boolean)) {
+        try {
+          process.kill(Number(pid), 'SIGKILL')
+          console.log('[main] killed stale PID %s', pid)
+        } catch { /* already gone */ }
+      }
     }
-  } catch { /* lsof found nothing or lsof not available */ }
+  } catch { /* no process found or command failed */ }
 
   await sleep(500)
 }
@@ -157,7 +175,7 @@ async function startSidecar(): Promise<void> {
   let healthy = await waitForHealth(15_000)
   if (!healthy) {
     console.error('[main] sidecar did not become healthy — retrying once')
-    stopSidecar()
+    await stopSidecar()
     await sleep(500)
     sidecarProcess = spawnSidecar(spec, paths)
     healthy = await waitForHealth(15_000)
@@ -185,21 +203,29 @@ async function waitForHealth(timeoutMs: number): Promise<boolean> {
   return false
 }
 
-function stopSidecar(): void {
-  if (sidecarProcess) {
-    // Send SIGTERM first so sidecar can gracefully stop app Ollama
-    sidecarProcess.kill('SIGTERM')
-    const proc = sidecarProcess
-    sidecarProcess = null
-    // Force kill after 5s if it hasn't exited — but only if process is still alive
-    // (avoids PID reuse risk where the PID was recycled by the OS)
+async function stopSidecar(): Promise<void> {
+  if (!sidecarProcess) return
+
+  const proc = sidecarProcess
+  sidecarProcess = null
+
+  if (process.platform === 'win32') {
+    // Windows: process.kill('SIGTERM') is TerminateProcess (hard kill, no cleanup).
+    // Use HTTP /shutdown so the sidecar can gracefully stop Ollama first.
+    try {
+      await fetch(`${SIDECAR_BASE}/shutdown`, { method: 'DELETE', signal: AbortSignal.timeout(5000) })
+    } catch { /* endpoint may not exist */ }
+    // Wait for graceful exit
+    await sleep(3000)
+    if (proc.exitCode === null && !proc.killed) {
+      try { execFileSync('taskkill', ['/F', '/PID', String(proc.pid)], { stdio: 'ignore' }) } catch { /* gone */ }
+    }
+  } else {
+    // Unix: SIGTERM gives sidecar a chance to run atexit cleanup
+    proc.kill('SIGTERM')
     setTimeout(() => {
       if (proc.exitCode === null && !proc.killed) {
-        try {
-          proc.kill('SIGKILL')
-        } catch {
-          /* already dead */
-        }
+        try { proc.kill('SIGKILL') } catch { /* already dead */ }
       }
     }, 5000)
   }
@@ -310,7 +336,7 @@ if (gotLock) {
         detail: `Folder: ${paths.appData}\n\nThis cannot be undone.`
       })
       if (result.response !== 0) return { ok: false, canceled: true }
-      stopSidecar()
+      await stopSidecar()
       rmSync(paths.appData, { recursive: true, force: true })
       app.quit()
       return { ok: true }
