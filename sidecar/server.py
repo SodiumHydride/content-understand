@@ -908,6 +908,87 @@ def get_page(slug: str):
     }
 
 
+@app.get("/v1/search")
+def search_notes(q: str = "", limit: int = 20):
+    import jieba
+
+    from engine.index.db import fts_search, open_db
+    from engine.paths import vault_dir
+
+    if not q.strip():
+        return {"results": []}
+
+    vp = vault_dir()
+    db_path = vp / ".content-app" / "index.db"
+    if not db_path.exists():
+        return {"results": []}
+
+    conn = open_db(vp)
+    try:
+        # Tokenize query with jieba for better Chinese matching
+        tokens = " ".join(jieba.cut(q))
+        results = fts_search(conn, tokens, limit=limit)
+        return {"results": results}
+    finally:
+        conn.close()
+
+
+@app.put("/v1/pages/{slug:path}")
+def save_page(slug: str, body: dict):
+    from engine.index.db import fts_rebuild, open_db, upsert_page
+    from engine.index.rebuild import upsert_single_file
+    from engine.paths import vault_dir
+
+    vp = vault_dir()
+    db_path = vp / ".content-app" / "index.db"
+    if not db_path.exists():
+        raise HTTPException(404, "Index not found")
+
+    new_body = body.get("body", "")
+    if not isinstance(new_body, str):
+        raise HTTPException(400, "body must be a string")
+
+    conn = open_db(vp)
+    try:
+        # Get current page info
+        row = conn.execute("SELECT path, title FROM pages WHERE slug=?", (slug,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Page not found")
+
+        page_path = row[0]
+        page_title = row[1]
+
+        # Read existing file to preserve frontmatter
+        md_path = vp / page_path
+        if not md_path.exists():
+            raise HTTPException(404, "File not found")
+
+        existing = md_path.read_text(encoding="utf-8")
+
+        # Split frontmatter and body
+        if existing.startswith("---"):
+            parts = existing.split("---", 2)
+            if len(parts) >= 3:
+                frontmatter = f"---{parts[1]}---\n"
+            else:
+                frontmatter = ""
+        else:
+            frontmatter = ""
+
+        # Write new content
+        md_path.write_text(frontmatter + new_body, encoding="utf-8")
+
+        # Re-index this file
+        upsert_single_file(vp, md_path)
+
+        # Rebuild FTS
+        fts_rebuild(conn)
+
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
 @app.get("/v1/export/{slug:path}")
 def export_page(slug: str):
     md_path = _safe_md_path(slug)

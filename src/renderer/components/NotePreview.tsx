@@ -1,13 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import MDEditor from '@uiw/react-md-editor'
 import { useQuery } from '@tanstack/react-query'
-import { Download, ExternalLink, FolderOpen, Link, Pin, Trash2, X } from 'lucide-react'
+import { Download, Edit3, ExternalLink, FolderOpen, Link, Pin, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
-import { fetchPage, fetchBacklinks } from '../lib/sidecar'
+import { fetchPage, fetchBacklinks, savePage } from '../lib/sidecar'
 import { splitTextWithWikilinks, resolveWikilinkTarget } from '../lib/wikilink'
 import {
   normalizeShelfType,
@@ -93,6 +94,9 @@ export function NotePreview({
   }, [selectItem])
 
   const [detail, setDetail] = useState<LibraryItem | null>(null)
+  const [editMode, setEditMode] = useState(false)
+  const [editBody, setEditBody] = useState('')
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -117,6 +121,34 @@ export function NotePreview({
     else selectItem(null)
   }
 
+  const startEdit = useCallback(() => {
+    if (!detail?.body) return
+    setEditBody(detail.body)
+    setEditMode(true)
+  }, [detail?.body])
+
+  const cancelEdit = useCallback(() => {
+    setEditMode(false)
+    setEditBody('')
+  }, [])
+
+  const handleSave = useCallback(async () => {
+    if (!detail?.slug) return
+    setSaving(true)
+    try {
+      const ok = await savePage(detail.slug, editBody)
+      if (ok) {
+        setDetail((prev) => (prev ? { ...prev, body: editBody } : prev))
+        setEditMode(false)
+        notify(t('note.saved'), { type: 'success' })
+      } else {
+        notify(t('note.saveFailed'), { type: 'error' })
+      }
+    } finally {
+      setSaving(false)
+    }
+  }, [detail?.slug, editBody, t])
+
   useEffect(() => {
     if ((presentation !== 'center' && presentation !== 'overlay') || !selectedSlug) return
     const onKey = (e: KeyboardEvent) => {
@@ -128,6 +160,22 @@ export function NotePreview({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [presentation, selectedSlug, closeReader])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
+        e.preventDefault()
+        if (editMode) cancelEdit()
+        else startEdit()
+      }
+      if (editMode && (e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        void handleSave()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [editMode, startEdit, cancelEdit, handleSave])
 
   // Focus trap for center/overlay presentations
   useEffect(() => {
@@ -283,6 +331,20 @@ export function NotePreview({
               <Trash2 size={13} />
               {t('note.delete')}
             </button>
+            {editMode ? (
+              <>
+                <button type="button" className="btn-ghost" onClick={cancelEdit} title={t('note.cancel')}>
+                  <X size={14} />
+                </button>
+                <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>
+                  {saving ? t('note.saving') : t('note.save')}
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn-ghost" onClick={startEdit} title={t('note.edit') + ' (⌘E)'}>
+                <Edit3 size={14} />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -294,9 +356,21 @@ export function NotePreview({
           <article className="note-reader-column">
             {detail.summary && <p className="note-reader-lead">{detail.summary}</p>}
             <div className="note-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                {detail.body || detail.summary}
-              </ReactMarkdown>
+              {editMode ? (
+                <div data-color-mode="light" className="note-editor">
+                  <MDEditor
+                    value={editBody}
+                    onChange={(val) => setEditBody(val ?? '')}
+                    height="100%"
+                    preview="live"
+                    visibleDragbar={false}
+                  />
+                </div>
+              ) : (
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {detail.body || detail.summary}
+                </ReactMarkdown>
+              )}
             </div>
             {backlinks.length > 0 && (
               <div className="backlinks-section">

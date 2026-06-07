@@ -690,3 +690,44 @@ export async function fetchGraph(): Promise<{ nodes: GraphNode[]; edges: GraphEd
     return { nodes: [], edges: [] }
   }
 }
+
+// ── Search ──
+
+export interface SearchResult {
+  slug: string
+  title: string
+  type: string
+  summary: string | null
+  snippet: string | null
+  rank: number
+}
+
+export async function searchNotes(query: string, limit = 20): Promise<SearchResult[]> {
+  const base = await getBase()
+  if (!base || !query.trim()) return []
+  try {
+    const r = await fetch(`${base}/v1/search?q=${encodeURIComponent(query)}&limit=${limit}`)
+    if (!r.ok) return []
+    const data = await r.json() as { results: SearchResult[] }
+    return data.results ?? []
+  } catch {
+    return []
+  }
+}
+
+// ── Save page ──
+
+export async function savePage(slug: string, body: string): Promise<boolean> {
+  const base = await getBase()
+  if (!base) return false
+  try {
+    const r = await fetch(`${base}/v1/pages/${encodeURIComponent(slug)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body })
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}

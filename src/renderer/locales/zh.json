@@ -181,9 +181,16 @@
     "wikilinkCopied": "已复制 [[{{title}}]]",
     "delete": "删除笔记",
     "deleteConfirm": "这将永久删除该笔记及其所有链接。此操作无法撤销。",
-    "deleted": "笔记已删除"
+    "deleted": "笔记已删除",
+    "edit": "编辑",
+    "save": "保存",
+    "saving": "保存中...",
+    "saved": "已保存",
+    "saveFailed": "保存失败",
+    "cancel": "取消"
   },
   "search": {
+    "noResults": "未找到结果",
     "wikilinkTitle": "搜索笔记链接",
     "wikilinkPlaceholder": "输入笔记标题…",
     "wikilinkHint": "Enter 复制 · Esc 关闭"

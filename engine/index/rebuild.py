@@ -11,6 +11,7 @@ from pathlib import Path
 
 from engine.index.db import (
     delete_links_for_source,
+    fts_rebuild,
     get_page_mtime,
     list_all_slugs,
     open_db,
@@ -128,6 +129,7 @@ def upsert_single_file(vault_path: Path, md_path: Path) -> bool:
             "url": (meta.get("sources") or meta.get("url") or "")[:500],
             "summary": meta.get("summary", "")[:500],
             "tags": tags if isinstance(tags, str) else json.dumps(tags, ensure_ascii=False),
+            "body": body,
             "created": meta.get("created", ""),
             "updated": meta.get("updated", datetime.now(timezone.utc).isoformat()),
             "body_hash": body_hash,
@@ -147,6 +149,7 @@ def upsert_single_file(vault_path: Path, md_path: Path) -> bool:
                 ctx = _wikilink_context(body, match.start(), match.end())
                 upsert_link(conn, slug, target_slug, ctx)
 
+    fts_rebuild(conn)
     return True
 
 
@@ -179,6 +182,9 @@ def rebuild_from_vault(vault_path: Path) -> int:
             [(s,) for s in orphans],
         )
         conn.commit()
+
+    # Rebuild FTS index after all files processed
+    fts_rebuild(conn)
 
     # Don't close — connection is pooled in db._connections
     return count

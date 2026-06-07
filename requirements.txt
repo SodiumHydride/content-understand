@@ -6,6 +6,7 @@ tenacity>=9.0.0
 huggingface-hub>=1.0.0,<2
 psutil>=7.0.0
 zstandard>=0.23.0
+jieba>=0.42.1
 
 # Engine dependencies (formerly content-understand-engine)
 yt-dlp>=2026.1.0

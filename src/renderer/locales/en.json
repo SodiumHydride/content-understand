@@ -181,9 +181,16 @@
     "wikilinkCopied": "Copied [[{{title}}]]",
     "delete": "Delete note",
     "deleteConfirm": "This will permanently delete the note and all its links. This cannot be undone.",
-    "deleted": "Note deleted"
+    "deleted": "Note deleted",
+    "edit": "Edit",
+    "save": "Save",
+    "saving": "Saving...",
+    "saved": "Saved",
+    "saveFailed": "Save failed",
+    "cancel": "Cancel"
   },
   "search": {
+    "noResults": "No results found",
     "wikilinkTitle": "Search note links",
     "wikilinkPlaceholder": "Type a note title…",
     "wikilinkHint": "Enter to copy · Esc to close"

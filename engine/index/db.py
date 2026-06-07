@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS pages (
     url TEXT NOT NULL DEFAULT '',
     summary TEXT NOT NULL DEFAULT '',
     tags TEXT NOT NULL DEFAULT '[]',
+    body TEXT NOT NULL DEFAULT '',
     created TEXT NOT NULL DEFAULT '',
     updated TEXT NOT NULL DEFAULT '',
     body_hash TEXT NOT NULL DEFAULT '',
@@ -28,6 +29,11 @@ CREATE TABLE IF NOT EXISTS pages (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pages_url ON pages(url) WHERE url != '';
+
+CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
+    title, summary, body, tags,
+    content=pages, content_rowid=rowid
+);
 
 CREATE TABLE IF NOT EXISTS links (
     source_slug TEXT NOT NULL,
@@ -88,8 +94,42 @@ def open_db(vault_path: Path) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")  # Concurrent reads + single write
         conn.execute("PRAGMA busy_timeout=10000")  # 10s retry on lock
         conn.executescript(SCHEMA)
+        _migrate(conn)
         _connections[db_path] = conn
         return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Apply incremental migrations for existing databases."""
+    try:
+        conn.execute("SELECT body FROM pages LIMIT 1")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE pages ADD COLUMN body TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+
+
+def fts_rebuild(conn: sqlite3.Connection) -> None:
+    """Rebuild the FTS index from the pages table."""
+    conn.execute("INSERT INTO pages_fts(pages_fts) VALUES('rebuild')")
+
+
+def fts_search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Full-text search with snippet highlights."""
+    safe_query = query.replace('"', '""')
+    rows = conn.execute(
+        """
+        SELECT p.slug, p.title, p.type, p.summary,
+                snippet(pages_fts, 2, '<mark>', '</mark>', '…', 32) as snippet,
+                rank
+        FROM pages_fts
+        JOIN pages p ON p.rowid = pages_fts.rowid
+        WHERE pages_fts MATCH ?
+        ORDER BY rank
+        LIMIT ?
+        """,
+        (safe_query, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_page_mtime(conn: sqlite3.Connection, slug: str) -> float | None:
@@ -99,15 +139,16 @@ def get_page_mtime(conn: sqlite3.Connection, slug: str) -> float | None:
 
 
 def upsert_page(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
+    row.setdefault("body", "")
     conn.execute(
         """
-        INSERT INTO pages (slug, path, title, type, platform, url, summary, tags, created, updated, body_hash, file_mtime)
-        VALUES (:slug, :path, :title, :type, :platform, :url, :summary, :tags, :created, :updated, :body_hash, :file_mtime)
+        INSERT INTO pages (slug, path, title, type, platform, url, summary, tags, body, created, updated, body_hash, file_mtime)
+        VALUES (:slug, :path, :title, :type, :platform, :url, :summary, :tags, :body, :created, :updated, :body_hash, :file_mtime)
         ON CONFLICT(slug) DO UPDATE SET
             path=excluded.path, title=excluded.title, type=excluded.type,
             platform=excluded.platform, url=excluded.url, summary=excluded.summary,
-            tags=excluded.tags, updated=excluded.updated, body_hash=excluded.body_hash,
-            file_mtime=excluded.file_mtime
+            tags=excluded.tags, body=excluded.body, updated=excluded.updated,
+            body_hash=excluded.body_hash, file_mtime=excluded.file_mtime
         """,
         row,
     )

@@ -50,6 +50,7 @@ a = Analysis(
         'fitz',  # PyMuPDF
         'huggingface_hub',
         'psutil',
+        'jieba',
         'engine.runtime.presets',
     ],
     hookspath=[],

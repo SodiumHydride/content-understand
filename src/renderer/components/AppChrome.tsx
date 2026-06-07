@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import {
@@ -13,6 +13,7 @@ import {
   Sparkles
 } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
+import { searchNotes, type SearchResult } from '../lib/sidecar'
 import { WikilinkSearch } from './WikilinkSearch'
 import type { ViewMode } from '../stores/types'
 import type { AppLocale } from '../lib/i18n'
@@ -27,6 +28,10 @@ const MODES: { id: ViewMode; icon: typeof Inbox }[] = [
 export function AppChrome(): React.JSX.Element {
   const { t, i18n } = useTranslation()
   const [wlSearchOpen, setWlSearchOpen] = useState(false)
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [showResults, setShowResults] = useState(false)
+  const searchTimeout = useRef<ReturnType<typeof setTimeout>>()
   const viewMode = useAppStore((s) => s.viewMode)
   const setViewMode = useAppStore((s) => s.setViewMode)
   const libraryQuery = useAppStore((s) => s.libraryQuery)
@@ -37,6 +42,7 @@ export function AppChrome(): React.JSX.Element {
   const applyLocale = useAppStore((s) => s.applyLocale)
   const sidecarOnline = useAppStore((s) => s.sidecarOnline)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
+  const selectItem = useAppStore((s) => s.selectItem)
 
   const vaultDisplay = settings.vaultPath || t('vault.unconfigured')
   const uiLang = i18n.language.startsWith('zh') ? 'zh' : 'en'
@@ -59,6 +65,23 @@ export function AppChrome(): React.JSX.Element {
     if (settings.vaultPath) void window.api.openPath(settings.vaultPath)
   }
 
+  const handleSearchChange = useCallback((value: string) => {
+    setLibraryQuery(value)
+    if (searchTimeout.current) clearTimeout(searchTimeout.current)
+    if (!value.trim()) {
+      setSearchResults([])
+      setShowResults(false)
+      return
+    }
+    searchTimeout.current = setTimeout(async () => {
+      setSearchLoading(true)
+      const results = await searchNotes(value)
+      setSearchResults(results)
+      setShowResults(true)
+      setSearchLoading(false)
+    }, 300)
+  }, [setLibraryQuery])
+
   // Cmd+L opens wikilink search
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -69,6 +92,17 @@ export function AppChrome(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Close search results dropdown on outside click
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('.search-container')) {
+        setShowResults(false)
+      }
+    }
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
   }, [])
 
   return (
@@ -98,17 +132,42 @@ export function AppChrome(): React.JSX.Element {
 
         <div className="chrome-actions">
           {showSearch && (
-            <div className="relative hidden md:block">
+            <div className="search-container relative hidden md:block">
               <Search
                 size={14}
                 className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-500"
               />
               <input
                 value={libraryQuery}
-                onChange={(e) => setLibraryQuery(e.target.value)}
+                onChange={(e) => handleSearchChange(e.target.value)}
                 placeholder={searchPlaceholder}
                 className="toolbar-search"
               />
+              {showResults && searchResults.length > 0 && (
+                <div className="search-results-dropdown">
+                  {searchResults.map((r) => (
+                    <button
+                      key={r.slug}
+                      type="button"
+                      className="search-result-item"
+                      onClick={() => {
+                        selectItem(r.slug, { reader: true })
+                        setShowResults(false)
+                      }}
+                    >
+                      <span className="search-result-title">{r.title}</span>
+                      {r.snippet && (
+                        <span className="search-result-snippet" dangerouslySetInnerHTML={{ __html: r.snippet }} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {showResults && searchResults.length === 0 && !searchLoading && (
+                <div className="search-results-dropdown">
+                  <div className="search-result-empty">{t('search.noResults')}</div>
+                </div>
+              )}
             </div>
           )}
 
