@@ -182,6 +182,7 @@
     "delete": "Delete note",
     "deleteConfirm": "This will permanently delete the note and all its links. This cannot be undone.",
     "deleted": "Note deleted",
+    "draw": "Draw",
     "edit": "Edit",
     "save": "Save",
     "saving": "Saving...",

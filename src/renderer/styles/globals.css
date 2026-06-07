@@ -1301,6 +1301,7 @@ html[data-locale='en'] {
 }
 
 .note-reader-scroll {
+  position: relative;
   flex: 1;
   overflow-y: auto;
   background: #f9f5ef;
@@ -3112,4 +3113,82 @@ html[data-locale='en'] {
   text-align: center;
   font-size: 12px;
   color: var(--text-secondary, var(--color-ink-600));
+}
+
+/* ─── Ink overlay ─── */
+.ink-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+  overflow: visible;
+}
+.ink-overlay-active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+/* Ink toolbar */
+.ink-toolbar {
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  padding: 4px 6px;
+  background: var(--color-paper, #fff);
+  border: 1px solid var(--divider, #e5e5e5);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  margin-left: auto;
+  width: fit-content;
+}
+.ink-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--color-ink-600, #666);
+  transition: all 0.15s;
+}
+.ink-tool-btn:hover {
+  background: var(--color-accent-soft, rgba(0,0,0,0.04));
+}
+.ink-tool-active {
+  background: var(--color-accent-soft, rgba(0,0,0,0.08));
+  color: var(--color-accent, #1a1a1a);
+}
+.ink-color-palette {
+  display: flex;
+  gap: 3px;
+  margin-left: 4px;
+  padding-left: 4px;
+  border-left: 1px solid var(--divider, #e5e5e5);
+}
+.ink-color-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.ink-color-btn:hover {
+  border-color: var(--color-ink-500, #999);
+}
+.ink-color-active {
+  border-color: var(--color-accent, #1a1a1a);
+}
+
+/* Draw mode active state for toolbar button */
+.btn-active {
+  background: var(--color-accent-soft, rgba(0,0,0,0.08));
+  color: var(--color-accent, #1a1a1a);
 }

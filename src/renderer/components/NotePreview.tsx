@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
@@ -6,7 +6,9 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import MDEditor from '@uiw/react-md-editor'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Edit3, ExternalLink, FolderOpen, Link, Pin, Trash2, X } from 'lucide-react'
+import { Download, Edit3, Eraser, ExternalLink, FolderOpen, Highlighter, Link, Pencil, Pin, Trash2, X } from 'lucide-react'
+import { NoteInkLayer } from './NoteInkLayer'
+import type { StrokeStyle } from '../lib/thinkingCanvas/types'
 import { useAppStore } from '../stores/appStore'
 import { fetchPage, fetchBacklinks, savePage } from '../lib/sidecar'
 import { splitTextWithWikilinks, resolveWikilinkTarget } from '../lib/wikilink'
@@ -97,11 +99,30 @@ export function NotePreview({
   const [editMode, setEditMode] = useState(false)
   const [editBody, setEditBody] = useState('')
   const [saving, setSaving] = useState(false)
+  const [drawMode, setDrawMode] = useState(false)
+  const [inkTool, setInkTool] = useState<'pen' | 'highlighter' | 'eraser'>('pen')
+  const [penColor, setPenColor] = useState('#1a1a1a')
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const penStyle: StrokeStyle = useMemo(() => ({
+    color: penColor,
+    width: 2.5,
+    opacity: 1,
+    variant: 'pen'
+  }), [penColor])
+
+  const highlighterStyle: StrokeStyle = useMemo(() => ({
+    color: '#fde68a',
+    width: 16,
+    opacity: 0.45,
+    variant: 'highlighter'
+  }), [])
 
   useEffect(() => {
     let cancelled = false
     if (!selectedSlug) {
       setDetail(null)
+      setDrawMode(false)
       return
     }
     const local = library.find((i) => i.slug === selectedSlug)
@@ -123,6 +144,7 @@ export function NotePreview({
 
   const startEdit = useCallback(() => {
     if (!detail?.body) return
+    setDrawMode(false)
     setEditBody(detail.body)
     setEditMode(true)
   }, [detail?.body])
@@ -168,6 +190,10 @@ export function NotePreview({
         if (editMode) cancelEdit()
         else startEdit()
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
+        e.preventDefault()
+        setDrawMode(prev => !prev)
+      }
       if (editMode && (e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
         void handleSave()
@@ -175,7 +201,7 @@ export function NotePreview({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [editMode, startEdit, cancelEdit, handleSave])
+  }, [editMode, startEdit, cancelEdit, handleSave, drawMode])
 
   // Focus trap for center/overlay presentations
   useEffect(() => {
@@ -341,15 +367,73 @@ export function NotePreview({
                 </button>
               </>
             ) : (
-              <button type="button" className="btn-ghost" onClick={startEdit} title={t('note.edit') + ' (⌘E)'}>
-                <Edit3 size={14} />
-              </button>
+              <>
+                <button type="button" className="btn-ghost" onClick={startEdit} title={t('note.edit') + ' (⌘E)'}>
+                  <Edit3 size={14} />
+                </button>
+                <button
+                  type="button"
+                  className={clsx('btn-ghost', drawMode && 'btn-active')}
+                  onClick={() => setDrawMode(!drawMode)}
+                  title={t('note.draw') + ' (⌘D)'}
+                >
+                  <Pencil size={14} />
+                </button>
+              </>
             )}
           </div>
         )}
       </div>
 
-      <div className="note-reader-scroll">
+      <div className="note-reader-scroll" ref={scrollRef}>
+        {drawMode && !editMode && (
+          <div className="ink-toolbar">
+            <button
+              type="button"
+              className={clsx('ink-tool-btn', inkTool === 'pen' && 'ink-tool-active')}
+              onClick={() => setInkTool('pen')}
+              title="Pen"
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              type="button"
+              className={clsx('ink-tool-btn', inkTool === 'highlighter' && 'ink-tool-active')}
+              onClick={() => setInkTool('highlighter')}
+              title="Highlighter"
+            >
+              <Highlighter size={14} />
+            </button>
+            <button
+              type="button"
+              className={clsx('ink-tool-btn', inkTool === 'eraser' && 'ink-tool-active')}
+              onClick={() => setInkTool('eraser')}
+              title="Eraser"
+            >
+              <Eraser size={14} />
+            </button>
+            <div className="ink-color-palette">
+              {['#1a1a1a', '#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6'].map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  className={clsx('ink-color-btn', penColor === c && 'ink-color-active')}
+                  style={{ background: c }}
+                  onClick={() => setPenColor(c)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+        <NoteInkLayer
+          slug={detail?.slug ?? ''}
+          scrollRef={scrollRef}
+          active={drawMode && !editMode}
+          tool={inkTool}
+          penStyle={penStyle}
+          highlighterStyle={highlighterStyle}
+          eraserWidth={20}
+        />
         {!detail ? (
           <p className="note-reader-loading">{t('preview.loading')}</p>
         ) : (

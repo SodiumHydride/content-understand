@@ -731,3 +731,31 @@ export async function savePage(slug: string, body: string): Promise<boolean> {
     return false
   }
 }
+
+export async function fetchNoteInk(slug: string): Promise<Record<string, unknown>[]> {
+  const base = await getBase()
+  if (!base) return []
+  try {
+    const r = await fetch(`${base}/v1/pages/${encodeURIComponent(slug)}/ink`)
+    if (!r.ok) return []
+    const data = await r.json() as { strokes: Record<string, unknown>[] }
+    return data.strokes ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function saveNoteInk(slug: string, strokes: Record<string, unknown>[]): Promise<boolean> {
+  const base = await getBase()
+  if (!base) return false
+  try {
+    const r = await fetch(`${base}/v1/pages/${encodeURIComponent(slug)}/ink`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ strokes })
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}

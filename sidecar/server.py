@@ -1140,6 +1140,63 @@ def delete_page(slug: str):
         conn.close()
 
 
+@app.get("/v1/pages/{slug:path}/ink")
+def get_note_ink(slug: str):
+    vp = vault_dir()
+    db_path = vp / ".content-app" / "index.db"
+    if not db_path.exists():
+        return {"strokes": []}
+
+    conn = open_db(vp)
+    try:
+        row = conn.execute("SELECT path FROM pages WHERE slug=?", (slug,)).fetchone()
+        if not row:
+            return {"strokes": []}
+        page_path = row[0]
+    finally:
+        conn.close()
+
+    md_path = vp / page_path
+    ink_path = md_path.with_suffix('.ink.json')
+
+    if not ink_path.exists():
+        return {"strokes": []}
+
+    try:
+        data = json.loads(ink_path.read_text(encoding="utf-8"))
+        return {"strokes": data.get("strokes", [])}
+    except Exception:
+        return {"strokes": []}
+
+
+@app.put("/v1/pages/{slug:path}/ink")
+def save_note_ink(slug: str, body: dict):
+    vp = vault_dir()
+    db_path = vp / ".content-app" / "index.db"
+    if not db_path.exists():
+        raise HTTPException(404, "Index not found")
+
+    conn = open_db(vp)
+    try:
+        row = conn.execute("SELECT path FROM pages WHERE slug=?", (slug,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Page not found")
+        page_path = row[0]
+    finally:
+        conn.close()
+
+    md_path = vp / page_path
+    ink_path = md_path.with_suffix('.ink.json')
+
+    if not ink_path.is_relative_to(vp.resolve()):
+        raise HTTPException(400, "Invalid path")
+
+    strokes = body.get("strokes", [])
+    ink_path.write_text(json.dumps({"strokes": strokes}, ensure_ascii=False), encoding="utf-8")
+
+    return {"ok": True}
+
+
 @app.get("/v1/links/graph")
 def get_graph():
     from engine.index.db import get_all_links, open_db
