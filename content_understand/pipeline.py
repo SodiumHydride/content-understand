@@ -318,15 +318,17 @@ class ContentPipeline:
             logger.warning("Unknown content type for %s, attempting article extraction", local_path)
             content_type = "article"
 
-        # Prompt priority: user custom > config template > language-aware default
+        # Prompt: base default + optional user/template suffix
         lang = getattr(self.config, "output_language", "zh") or "zh"
         if prompt:
             effective_prompt = prompt
-        elif self.config.prompt_template:
-            effective_prompt = self.config.prompt_template
         else:
             defaults = _DEFAULT_PROMPTS.get(content_type, {})
-            effective_prompt = defaults.get(lang, defaults.get("zh", ""))
+            base_prompt = defaults.get(lang, defaults.get("zh", ""))
+            if self.config.prompt_template:
+                effective_prompt = base_prompt + "\n\n" + self.config.prompt_template
+            else:
+                effective_prompt = base_prompt
 
         # Format article template variables before passing to any model path
         if content_type == "article" and effective_prompt and "{text}" in effective_prompt:
