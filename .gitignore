@@ -8,7 +8,7 @@ release/
 sidecar-dist/
 build/
 
-# Design docs & personal notes (not for open source)
+# Docs
 docs/
 
 # Vite / tooling cache
