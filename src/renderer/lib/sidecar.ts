@@ -653,6 +653,17 @@ export interface GraphEdge {
   context: string | null
 }
 
+export async function deletePage(slug: string): Promise<boolean> {
+  const base = await getBase()
+  if (!base) return false
+  try {
+    const r = await fetch(`${base}/v1/pages/${encodeURIComponent(slug)}`, { method: 'DELETE' })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
 export async function createLink(sourceSlug: string, targetSlug: string): Promise<boolean> {
   const base = await getBase()
   if (!base) return false

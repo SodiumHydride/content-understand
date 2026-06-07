@@ -178,7 +178,10 @@
   "note": {
     "backlinks": "Backlinks",
     "copyWikilink": "Copy wikilink",
-    "wikilinkCopied": "Copied [[{{title}}]]"
+    "wikilinkCopied": "Copied [[{{title}}]]",
+    "delete": "Delete note",
+    "deleteConfirm": "This will permanently delete the note and all its links. This cannot be undone.",
+    "deleted": "Note deleted"
   },
   "search": {
     "wikilinkTitle": "Search note links",

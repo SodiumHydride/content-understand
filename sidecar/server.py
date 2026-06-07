@@ -949,17 +949,24 @@ def create_link(body: CreateLinkPayload):
 
     conn = open_db(vp)
     try:
-        # Get target title for wikilink context
-        row = conn.execute(
-            "SELECT title FROM pages WHERE slug=?", (body.target_slug,)
-        ).fetchone()
-        target_title = row[0] if row else body.target_slug
+        # Get both titles
+        rows = conn.execute(
+            "SELECT slug, title FROM pages WHERE slug IN (?, ?)",
+            (body.source_slug, body.target_slug),
+        ).fetchall()
+        title_map = {r[0]: r[1] for r in rows}
+        source_title = title_map.get(body.source_slug, body.source_slug)
+        target_title = title_map.get(body.target_slug, body.target_slug)
 
+        # A -> B
         upsert_link(conn, body.source_slug, body.target_slug, f"[[{target_title}]]")
+        # B -> A (bidirectional)
+        upsert_link(conn, body.target_slug, body.source_slug, f"[[{source_title}]]")
         conn.commit()
 
-        # Also append wikilink to source markdown file
+        # Append wikilinks to both markdown files
         _append_wikilink_to_file(vp, body.source_slug, target_title)
+        _append_wikilink_to_file(vp, body.target_slug, source_title)
 
         return {"ok": True}
     finally:
@@ -977,6 +984,79 @@ def _append_wikilink_to_file(vp: Path, source_slug: str, target_title: str) -> N
     wikilink = f"\n\n[[{target_title}]]\n"
     with md_path.open("a", encoding="utf-8") as f:
         f.write(wikilink)
+
+
+def _cleanup_wikilinks_for_deleted(vp: Path, deleted_title: str, conn) -> None:
+    """Remove wikilinks referencing the deleted page from all .md files in the vault."""
+    import re
+
+    wikilink_re = re.compile(r'\[\[' + re.escape(deleted_title) + r'(?:\|[^\]]+)?\]\]')
+
+    for md_file in vp.rglob("*.md"):
+        # Skip the file that's being deleted (if it still exists)
+        try:
+            if not md_file.is_relative_to(vp.resolve()):
+                continue
+        except (ValueError, OSError):
+            continue
+        try:
+            text = md_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        new_text = wikilink_re.sub(deleted_title, text)
+        if new_text != text:
+            try:
+                md_file.write_text(new_text, encoding="utf-8")
+            except OSError:
+                pass
+
+
+@app.delete("/v1/pages/{slug:path}")
+def delete_page(slug: str):
+    from engine.index.db import delete_links_for_source, open_db
+    from engine.paths import vault_dir
+
+    vp = vault_dir()
+    db_path = vp / ".content-app" / "index.db"
+    if not db_path.exists():
+        raise HTTPException(404, "Index not found")
+
+    conn = open_db(vp)
+    try:
+        # Get the page info
+        row = conn.execute("SELECT path, title FROM pages WHERE slug=?", (slug,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Page not found")
+
+        page_path = row[0]
+        page_title = row[1]
+
+        # Delete outgoing links
+        delete_links_for_source(conn, slug)
+
+        # Delete incoming links (other pages linking to this one)
+        conn.execute("DELETE FROM links WHERE target_slug=?", (slug,))
+        conn.commit()
+
+        # Delete from pages table
+        conn.execute("DELETE FROM pages WHERE slug=?", (slug,))
+        conn.commit()
+
+        # Delete the actual file
+        file_path = vp / page_path
+        try:
+            resolved = file_path.resolve()
+            if resolved.exists() and resolved.is_relative_to(vp.resolve()):
+                resolved.unlink()
+        except OSError:
+            pass
+
+        # Clean up wikilinks referencing this page from other markdown files
+        _cleanup_wikilinks_for_deleted(vp, page_title, conn)
+
+        return {"ok": True, "deleted": slug}
+    finally:
+        conn.close()
 
 
 @app.get("/v1/links/graph")

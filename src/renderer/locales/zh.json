@@ -178,7 +178,10 @@
   "note": {
     "backlinks": "反向链接",
     "copyWikilink": "复制链接",
-    "wikilinkCopied": "已复制 [[{{title}}]]"
+    "wikilinkCopied": "已复制 [[{{title}}]]",
+    "delete": "删除笔记",
+    "deleteConfirm": "这将永久删除该笔记及其所有链接。此操作无法撤销。",
+    "deleted": "笔记已删除"
   },
   "search": {
     "wikilinkTitle": "搜索笔记链接",

@@ -351,6 +351,7 @@ interface AppState {
   removeTask: (id: string) => void
   refreshLibrary: () => Promise<void>
   startUnderstand: (url: string) => Promise<void>
+  deletePage: (slug: string) => Promise<boolean>
 }
 
 export const useAppStore = create<AppState>()(
@@ -651,6 +652,29 @@ export const useAppStore = create<AppState>()(
             selectedSlug: still ? prev : null
           })
         }
+      },
+
+      deletePage: async (slug: string): Promise<boolean> => {
+        const { deletePage: apiDelete } = await import('../lib/sidecar')
+        const ok = await apiDelete(slug)
+        if (!ok) return false
+        set((s) => {
+          const library = s.library.filter((i) => i.slug !== slug)
+          const pinnedSlugs = s.pinnedSlugs.filter((id) => id !== slug)
+          const wikiPinnedSlugs = s.wikiPinnedSlugs.filter((id) => id !== slug)
+          const { [slug]: _tw, ...thinkingMap } = s.thinkingMap
+          const { [slug]: _ww, ...wikiMap } = s.wikiMap
+          return {
+            library,
+            pinnedSlugs,
+            wikiPinnedSlugs,
+            thinkingMap,
+            wikiMap,
+            selectedSlug: s.selectedSlug === slug ? null : s.selectedSlug,
+            readerOpen: s.selectedSlug === slug ? false : s.readerOpen
+          }
+        })
+        return true
       },
 
       startUnderstand: async (url: string) => {

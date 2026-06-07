@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { LayoutGrid, Map, Network, Pin, X } from 'lucide-react'
+import { LayoutGrid, Map, Network, Pin, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { createLink, fetchGraph } from '../lib/sidecar'
 import { animateForceLayout, type ForceEdge } from '../lib/forceLayout'
@@ -78,6 +78,7 @@ export function MapView(): React.JSX.Element {
   const viewMode = useAppStore((s) => s.viewMode)
   const readerOpen = useAppStore((s) => s.readerOpen)
   const closeReader = useAppStore((s) => s.closeReader)
+  const deletePage = useAppStore((s) => s.deletePage)
 
   const viewportRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -560,6 +561,20 @@ export function MapView(): React.JSX.Element {
           onSelect: () => toggleWikiPin(slug)
         })
       }
+      items.push({ kind: 'separator' })
+      items.push({
+        kind: 'item',
+        label: t('note.delete'),
+        onSelect: () => {
+          if (window.confirm(t('note.deleteConfirm'))) {
+            void deletePage(slug).then((ok) => {
+              if (ok) {
+                void queryClient.invalidateQueries({ queryKey: ['wiki-graph'] })
+              }
+            })
+          }
+        }
+      })
       return items
     }
 

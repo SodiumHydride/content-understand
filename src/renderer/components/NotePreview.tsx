@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQuery } from '@tanstack/react-query'
-import { Download, ExternalLink, FolderOpen, Link, Pin, X } from 'lucide-react'
+import { Download, ExternalLink, FolderOpen, Link, Pin, Trash2, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { fetchPage, fetchBacklinks } from '../lib/sidecar'
 import { splitTextWithWikilinks, resolveWikilinkTarget } from '../lib/wikilink'
@@ -65,6 +65,7 @@ export function NotePreview({
   const closeReader = useAppStore((s) => s.closeReader)
   const togglePin = useAppStore((s) => s.togglePin)
   const isPinned = useAppStore((s) => s.isPinned)
+  const deletePage = useAppStore((s) => s.deletePage)
 
   const { data: backlinksData } = useQuery({
     queryKey: ['backlinks', selectedSlug],
@@ -264,6 +265,24 @@ export function NotePreview({
                 {t('preview.source')}
               </a>
             )}
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(t('note.deleteConfirm'))) {
+                  void deletePage(detail.slug).then((ok) => {
+                    if (ok) {
+                      notify(t('note.deleted'), { type: 'success', duration: 2000 })
+                      dismissReader()
+                    }
+                  })
+                }
+              }}
+              className="btn-ghost"
+              title={t('note.delete')}
+            >
+              <Trash2 size={13} />
+              {t('note.delete')}
+            </button>
           </div>
         )}
       </div>
