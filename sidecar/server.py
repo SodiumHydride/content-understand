@@ -44,6 +44,22 @@ def _inject_bundled_ffmpeg():
             logger.info("Injected bundled ffmpeg: %s", ffmpeg_bin_dir)
     except Exception:
         pass
+
+
+def _apply_proxy_env(proxy_settings: dict[str, Any]) -> None:
+    """Apply HTTP proxy settings to environment variables."""
+    proxy = (proxy_settings.get("httpProxy") or "").strip()
+    if proxy:
+        os.environ["http_proxy"] = proxy
+        os.environ["https_proxy"] = proxy
+        os.environ["HTTP_PROXY"] = proxy
+        os.environ["HTTPS_PROXY"] = proxy
+        logger.info("Proxy set: %s", proxy)
+    else:
+        # Clear any app-set proxy (keep system proxy)
+        for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+            # Only clear if it was set by us (not by the system)
+            pass  # Don't clear — let system proxy work
 from engine.runtime.hardware import probe_hardware
 from engine.runtime.manager import get_runtime_manager
 from engine.runtime.port_utils import (
@@ -387,6 +403,8 @@ def get_paths():
 def set_config(body: ConfigPayload):
     global _engine_config
     _engine_config = body.settings
+    # Apply proxy settings to environment
+    _apply_proxy_env(body.settings.get("proxySettings", {}))
     return {"ok": True}
 
 
@@ -623,8 +641,14 @@ def ollama_download(body: OllamaDownloadPayload):
     from engine.paths import app_data_root
     from engine.runtime.ollama_manager import start_app_ollama_download
 
+    # Read GitHub mirror from engine config
+    mirror = ""
+    if _engine_config:
+        proxy = _engine_config.get("proxySettings", {})
+        mirror = proxy.get("githubMirror", "")
+
     runtime_dir = app_data_root() / "runtime"
-    return start_app_ollama_download(runtime_dir)
+    return start_app_ollama_download(runtime_dir, github_mirror=mirror)
 
 
 class OllamaStartPayload(BaseModel):

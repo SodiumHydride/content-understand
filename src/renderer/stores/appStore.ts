@@ -76,7 +76,12 @@ const defaultSettings: AppSettings = {
   },
   outputLanguage: 'zh',
   promptTemplate: '',
-  cookiesPath: ''
+  cookiesPath: '',
+  proxySettings: {
+    httpProxy: '',
+    githubMirror: '',
+    ollamaMirror: ''
+  }
 }
 
 /** Migrate old flat settings to new provider-based format. */

@@ -128,6 +128,19 @@ export interface AppSettings {
 
   // ── Misc ──
   cookiesPath: string
+
+  // ── Network / Proxy ──
+  proxySettings: ProxySettings
+}
+
+/** Proxy and mirror settings for downloads. */
+export interface ProxySettings {
+  /** HTTP proxy URL (e.g. "http://127.0.0.1:7890"). Empty = system default. */
+  httpProxy: string
+  /** GitHub release mirror prefix (e.g. "https://mirror.ghproxy.com/"). Empty = direct. */
+  githubMirror: string
+  /** Ollama registry mirror (e.g. "https://mirror.ollama.com"). Empty = official. */
+  ollamaMirror: string
 }
 
 /** Video frame extraction settings. */

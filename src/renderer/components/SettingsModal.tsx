@@ -375,6 +375,51 @@ export function SettingsModal(): React.JSX.Element | null {
                   onAfterExport={pushEngineConfig}
                   isZh={isZh}
                 />
+
+                {/* ── Network / Proxy ── */}
+                <Section title={isZh ? '网络与代理' : 'Network & Proxy'}>
+                  <Field label={isZh ? 'HTTP 代理' : 'HTTP Proxy'}>
+                    <input
+                      value={settings.proxySettings?.httpProxy ?? ''}
+                      onChange={(e) => updateSettings({
+                        proxySettings: { ...settings.proxySettings, httpProxy: e.target.value }
+                      })}
+                      placeholder={isZh ? '留空使用系统代理，例: http://127.0.0.1:7890' : 'Leave empty for system proxy, e.g. http://127.0.0.1:7890'}
+                      className="settings-input text-[12px]"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                  </Field>
+
+                  <Field label={isZh ? 'GitHub 下载镜像' : 'GitHub Download Mirror'}>
+                    <input
+                      value={settings.proxySettings?.githubMirror ?? ''}
+                      onChange={(e) => updateSettings({
+                        proxySettings: { ...settings.proxySettings, githubMirror: e.target.value }
+                      })}
+                      placeholder={isZh ? '留空直连，例: https://mirror.ghproxy.com/' : 'Leave empty for direct, e.g. https://mirror.ghproxy.com/'}
+                      className="settings-input text-[12px]"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <p className="mt-1 text-[10px] text-ink-500">
+                      {isZh ? 'Ollama 二进制下载加速。国内常用: mirror.ghproxy.com, ghfast.top' : 'Accelerate Ollama binary download.'}
+                    </p>
+                  </Field>
+
+                  <Field label={isZh ? 'Ollama 模型镜像' : 'Ollama Model Mirror'}>
+                    <input
+                      value={settings.proxySettings?.ollamaMirror ?? ''}
+                      onChange={(e) => updateSettings({
+                        proxySettings: { ...settings.proxySettings, ollamaMirror: e.target.value }
+                      })}
+                      placeholder={isZh ? '留空用官方源，例: https://mirror.ollama.com' : 'Leave empty for official, e.g. https://mirror.ollama.com'}
+                      className="settings-input text-[12px]"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                    <p className="mt-1 text-[10px] text-ink-500">
+                      {isZh ? '模型拉取加速。Ollama 官方有国内镜像 mirror.ollama.com' : 'Model pull acceleration.'}
+                    </p>
+                  </Field>
+                </Section>
                 <Field label={t('settings.cacheDir')}>
                   <input
                     readOnly

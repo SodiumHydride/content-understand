@@ -40,6 +40,11 @@ class ContentConfig(BaseModel):
     frame_strategy: str = "uniform"
     frame_num_ctx: int = 16384  # Ollama context size for local models
 
+    # Network / Proxy settings (from UI)
+    http_proxy: str = ""  # HTTP proxy URL, empty = system default
+    github_mirror: str = ""  # GitHub release mirror prefix
+    ollama_mirror: str = ""  # Ollama registry mirror
+
     def get_backend(self, name: str) -> BackendConfig:
         if name in self.backends:
             return self.backends[name]

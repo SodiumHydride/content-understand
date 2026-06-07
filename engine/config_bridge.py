@@ -150,6 +150,7 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
     # Extract frame settings from UI
     frame_settings = data.get("frameSettings", {})
     audio_settings = data.get("audioExtractSettings", {})
+    proxy_settings = data.get("proxySettings", {})
 
     return ContentConfig(
         backends=backends,
@@ -167,6 +168,9 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
         frame_scale=str(frame_settings.get("scale", "")),
         frame_strategy=str(frame_settings.get("strategy", "uniform")),
         frame_num_ctx=int(frame_settings.get("numCtx", 16384)),
+        http_proxy=str(proxy_settings.get("httpProxy", "")),
+        github_mirror=str(proxy_settings.get("githubMirror", "")),
+        ollama_mirror=str(proxy_settings.get("ollamaMirror", "")),
     )
 
 

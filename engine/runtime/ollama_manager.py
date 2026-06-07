@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 OLLAMA_VERSION = "v0.30.6"
 OLLAMA_RELEASE_BASE = f"https://github.com/ollama/ollama/releases/download/{OLLAMA_VERSION}"
 
+# Default GitHub mirror for China users (prefix before the original URL)
+_DEFAULT_GITHUB_MIRROR = ""  # e.g. "https://mirror.ghproxy.com/"
+
 ProgressFn = Callable[[str, int, str], None]
 
 _daemon: OllamaDaemon | None = None
@@ -54,7 +57,7 @@ def app_download_state() -> dict[str, object]:
         return dict(_download_state)
 
 
-def start_app_ollama_download(runtime_dir: Path) -> dict[str, object]:
+def start_app_ollama_download(runtime_dir: Path, github_mirror: str = "") -> dict[str, object]:
     """Download app Ollama in a background thread so the sidecar stays responsive."""
     with _download_lock:
         if _download_state["running"]:
@@ -85,7 +88,7 @@ def start_app_ollama_download(runtime_dir: Path) -> dict[str, object]:
 
     def _run() -> None:
         try:
-            download_ollama(runtime_dir, on_progress=_progress)
+            download_ollama(runtime_dir, on_progress=_progress, github_mirror=github_mirror)
             with _download_lock:
                 _download_state.update({
                     "running": False,
@@ -352,6 +355,7 @@ def _download_with_progress(url: str, dest: Path, on_progress: ProgressFn | None
 def download_ollama(
     runtime_dir: Path,
     on_progress: ProgressFn | None = None,
+    github_mirror: str = "",
 ) -> Path:
     """Download Ollama binary into app storage."""
     asset = _platform_asset()
@@ -359,7 +363,9 @@ def download_ollama(
         raise RuntimeError(f"Unsupported platform: {platform.system()} {platform.machine()}")
 
     filename, kind = asset
-    url = f"{OLLAMA_RELEASE_BASE}/{filename}"
+    base_url = f"{OLLAMA_RELEASE_BASE}/{filename}"
+    mirror = github_mirror or _DEFAULT_GITHUB_MIRROR
+    url = f"{mirror}{base_url}" if mirror else base_url
     dest_dir = app_ollama_dir(runtime_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
     binary = app_binary_path(runtime_dir)
