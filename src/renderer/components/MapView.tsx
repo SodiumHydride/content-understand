@@ -2,9 +2,10 @@ import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
-import { Map, X } from 'lucide-react'
+import { LayoutGrid, Map, Network, Pin, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { fetchGraph } from '../lib/sidecar'
+import { animateForceLayout, type ForceEdge } from '../lib/forceLayout'
 import { MAP_NODE_H, MAP_NODE_W, type MapCanvasRect } from '../lib/mapCanvasBounds'
 import { mergeMapLayout } from '../lib/mapLayout'
 import {
@@ -66,6 +67,10 @@ export function MapView(): React.JSX.Element {
   const setThinkingToolPrefs = useAppStore((s) => s.setThinkingToolPrefs)
   const patchThinkingCanvas = useAppStore((s) => s.patchThinkingCanvas)
   const setMapNodePos = useAppStore((s) => s.setMapNodePos)
+  const wikiLayoutMode = useAppStore((s) => s.wikiLayoutMode)
+  const setWikiLayoutMode = useAppStore((s) => s.setWikiLayoutMode)
+  const wikiPinnedSlugs = useAppStore((s) => s.wikiPinnedSlugs)
+  const toggleWikiPin = useAppStore((s) => s.toggleWikiPin)
   const selectedSlug = useAppStore((s) => s.selectedSlug)
   const libraryQuery = useAppStore((s) => s.libraryQuery)
   const selectItem = useAppStore((s) => s.selectItem)
@@ -128,6 +133,74 @@ export function MapView(): React.JSX.Element {
     }
     return set
   }, [highlightSlug, graph?.edges])
+
+  // Build force edges from graph data
+  const forceEdges = useMemo((): ForceEdge[] => {
+    if (!graph?.edges) return []
+    return graph.edges.map((e) => ({ source: e.source_slug, target: e.target_slug }))
+  }, [graph?.edges])
+
+  // Track if force layout is currently running so drag can auto-pin
+  const forceRunningRef = useRef(false)
+
+  // Force layout animation effect
+  useEffect(() => {
+    if (mapMode !== 'wiki' || wikiLayoutMode !== 'force') return
+    if (forceEdges.length === 0) return
+    if (library.length === 0) return
+
+    const pinnedSet = new Set(wikiPinnedSlugs)
+    const currentLayout = { ...wikiMap }
+
+    // Ensure every library node has a starting position
+    for (const item of library) {
+      if (!currentLayout[item.slug]) {
+        currentLayout[item.slug] = { x: 48, y: 48 }
+      }
+    }
+
+    forceRunningRef.current = true
+
+    const cancel = animateForceLayout(
+      currentLayout,
+      forceEdges,
+      pinnedSet,
+      (positions) => {
+        // On each frame, batch update all node positions
+        for (const [slug, pos] of Object.entries(positions)) {
+          setMapNodePos('wiki', slug, pos)
+        }
+      },
+      (finalPositions) => {
+        // On complete, save final positions
+        for (const [slug, pos] of Object.entries(finalPositions)) {
+          setMapNodePos('wiki', slug, pos)
+        }
+        forceRunningRef.current = false
+      }
+    )
+
+    return () => {
+      cancel()
+      forceRunningRef.current = false
+    }
+  }, [mapMode, wikiLayoutMode, forceEdges, library, wikiPinnedSlugs, wikiMap, setMapNodePos])
+
+  // When switching from force to grid, reset to default grid layout
+  useEffect(() => {
+    if (mapMode !== 'wiki' || wikiLayoutMode !== 'grid') return
+    // Only reset if we were previously in force mode (positions are scattered)
+    // Apply a simple grid layout
+    const cols = Math.ceil(Math.sqrt(library.length))
+    const spacingX = 220
+    const spacingY = 160
+    for (let i = 0; i < library.length; i++) {
+      const slug = library[i].slug
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      setMapNodePos('wiki', slug, { x: 48 + col * spacingX, y: 48 + row * spacingY })
+    }
+  }, [wikiLayoutMode]) // Only run when layout mode changes
 
   const clientToWorld = useCallback(
     (clientX: number, clientY: number) => {
@@ -295,6 +368,10 @@ export function MapView(): React.JSX.Element {
     e.stopPropagation()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     setDrag({ kind: 'note', id: slug, startX: e.clientX, startY: e.clientY, originX: x, originY: y })
+    // Auto-pin when dragging in wiki force layout
+    if (mapMode === 'wiki' && wikiLayoutMode === 'force' && !wikiPinnedSlugs.includes(slug)) {
+      toggleWikiPin(slug)
+    }
   }
 
   const onCanvasClick = () => {
@@ -447,13 +524,23 @@ export function MapView(): React.JSX.Element {
     }
 
     if (menu.target === 'note' && menu.slug) {
-      return [
+      const slug = menu.slug
+      const isWikiPinned = wikiPinnedSlugs.includes(slug)
+      const items: ContextMenuEntry[] = [
         {
           kind: 'item',
           label: t('map.menu.readNote'),
-          onSelect: () => selectItem(menu.slug!, { reader: true })
+          onSelect: () => selectItem(slug, { reader: true })
         }
       ]
+      if (mapMode === 'wiki') {
+        items.push({
+          kind: 'item',
+          label: isWikiPinned ? t('map.menu.unpinNote') : t('map.menu.pinNote'),
+          onSelect: () => toggleWikiPin(slug)
+        })
+      }
+      return items
     }
 
     if (mapMode === 'wiki') {
@@ -482,7 +569,7 @@ export function MapView(): React.JSX.Element {
         }
       }
     ]
-  }, [menu, mapMode, t, selectItem, canvasInput, patchThinkingCanvas, thinkingToolPrefs.text])
+  }, [menu, mapMode, t, selectItem, canvasInput, patchThinkingCanvas, thinkingToolPrefs.text, wikiPinnedSlugs, toggleWikiPin])
 
   const peekItem = useMemo(
     () => (selectedSlug ? library.find((i) => i.slug === selectedSlug) : undefined),
@@ -530,6 +617,26 @@ export function MapView(): React.JSX.Element {
             </button>
           ))}
         </div>
+        {mapMode === 'wiki' && (
+          <div className="map-layout-toggle" role="group" aria-label="Layout mode">
+            <button
+              type="button"
+              className={clsx('map-layout-btn', wikiLayoutMode === 'grid' && 'map-layout-btn-active')}
+              onClick={() => setWikiLayoutMode('grid')}
+              aria-label="Grid layout"
+            >
+              <LayoutGrid size={14} />
+            </button>
+            <button
+              type="button"
+              className={clsx('map-layout-btn', wikiLayoutMode === 'force' && 'map-layout-btn-active')}
+              onClick={() => setWikiLayoutMode('force')}
+              aria-label="Force layout"
+            >
+              <Network size={14} />
+            </button>
+          </div>
+        )}
       </header>
 
       {showWikiEmpty ? (
@@ -651,6 +758,9 @@ export function MapView(): React.JSX.Element {
                     <span className="map-node-dot" style={{ background: accent }} aria-hidden />
                     <span className="map-node-title">{item.title}</span>
                     {item.summary && <span className="map-node-summary">{item.summary}</span>}
+                    {mapMode === 'wiki' && wikiPinnedSlugs.includes(item.slug) && (
+                      <Pin size={10} className="map-node-pin-icon" aria-label={t('map.menu.unpinNote')} />
+                    )}
                   </div>
                 )
               })}

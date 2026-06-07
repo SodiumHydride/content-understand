@@ -4,6 +4,8 @@ export type ViewMode = 'capture' | 'vault' | 'journal' | 'map'
 
 export type MapMode = 'thinking' | 'wiki'
 
+export type WikiLayoutMode = 'grid' | 'force'
+
 export interface MapNodePos {
   x: number
   y: number

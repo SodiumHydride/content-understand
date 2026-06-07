@@ -126,6 +126,8 @@
       "deleteElement": "Delete",
       "replaceImage": "Replace image",
       "readNote": "Read note",
+      "pinNote": "Pin position",
+      "unpinNote": "Unpin position",
       "wikiCanvasLabel": "Wiki graph",
       "editLinks": "Edit links for this note",
       "linkNotes": "Connect to another note…"

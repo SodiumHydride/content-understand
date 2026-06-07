@@ -2052,6 +2052,50 @@ html[data-locale='en'] {
   align-items: center;
 }
 
+.map-layout-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: var(--space-2);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--color-ink-50, #f5f5f5);
+}
+
+.map-layout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--color-ink-500, #888);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.map-layout-btn:hover {
+  background: var(--color-ink-100, #e8e8e8);
+  color: var(--color-ink-700, #555);
+}
+
+.map-layout-btn-active {
+  background: #fff;
+  color: var(--color-ink-900, #222);
+  box-shadow: var(--shadow-sm);
+}
+
+.map-node-pin-icon {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  color: var(--color-ink-400, #aaa);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 /* Wiki: bottom peek — graph stays full width (Notion center-peek / Roam highlight pattern) */
 .map-peek-bar {
   display: flex;

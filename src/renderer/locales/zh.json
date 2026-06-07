@@ -126,6 +126,8 @@
       "deleteElement": "删除",
       "replaceImage": "替换图片",
       "readNote": "阅读笔记",
+      "pinNote": "固定位置",
+      "unpinNote": "取消固定",
       "wikiCanvasLabel": "Wiki 图谱",
       "editLinks": "编辑此笔记的链接",
       "linkNotes": "连接到另一条笔记…"

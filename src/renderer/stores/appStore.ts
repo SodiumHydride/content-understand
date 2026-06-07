@@ -11,7 +11,8 @@ import type {
   ProviderId,
   ScratchNode,
   UnderstandTask,
-  ViewMode
+  ViewMode,
+  WikiLayoutMode
 } from './types'
 import type { ThinkingCanvasDocument, ThinkingToolPreferences } from '../lib/thinkingCanvas/types'
 import { createEmptyDocument } from '../lib/thinkingCanvas/document'
@@ -291,6 +292,8 @@ interface AppState {
   mapMode: MapMode
   thinkingMap: Record<string, MapNodePos>
   wikiMap: Record<string, MapNodePos>
+  wikiLayoutMode: WikiLayoutMode
+  wikiPinnedSlugs: string[]
   thinkingScratch: ScratchNode[]
   thinkingCanvas: ThinkingCanvasDocument | null
   thinkingCanvasReady: boolean
@@ -327,6 +330,9 @@ interface AppState {
   updateNote: (slug: string, patch: Partial<Pick<LibraryItem, 'title' | 'body' | 'summary'>>) => void
   setVaultNodePos: (slug: string, pos: MapNodePos) => void
   setMapNodePos: (map: MapMode, id: string, pos: MapNodePos) => void
+  setWikiLayoutMode: (mode: WikiLayoutMode) => void
+  toggleWikiPin: (slug: string) => void
+  setWikiPinnedSlugs: (slugs: string[]) => void
   addScratchNode: (text: string, pos?: MapNodePos) => string
   updateScratchNode: (id: string, patch: Partial<ScratchNode>) => void
   removeScratchNode: (id: string) => void
@@ -367,6 +373,8 @@ export const useAppStore = create<AppState>()(
       mapMode: 'thinking',
       thinkingMap: {},
       wikiMap: {},
+      wikiLayoutMode: 'force',
+      wikiPinnedSlugs: [],
       thinkingScratch: [],
       thinkingCanvas: null,
       thinkingCanvasReady: false,
@@ -537,6 +545,17 @@ export const useAppStore = create<AppState>()(
             ? { thinkingMap: { ...s.thinkingMap, [id]: pos } }
             : { wikiMap: { ...s.wikiMap, [id]: pos } }
         ),
+      setWikiLayoutMode: (wikiLayoutMode) => set({ wikiLayoutMode }),
+      toggleWikiPin: (slug) =>
+        set((s) => {
+          const pinned = s.wikiPinnedSlugs.includes(slug)
+          return {
+            wikiPinnedSlugs: pinned
+              ? s.wikiPinnedSlugs.filter((id) => id !== slug)
+              : [...s.wikiPinnedSlugs, slug]
+          }
+        }),
+      setWikiPinnedSlugs: (wikiPinnedSlugs) => set({ wikiPinnedSlugs }),
       addScratchNode: (text, pos) => {
         const id = `scratch-${crypto.randomUUID()}`
         const count = get().thinkingScratch.length
@@ -704,6 +723,8 @@ export const useAppStore = create<AppState>()(
           mapMode: s.mapMode,
           thinkingMap: s.thinkingMap,
           wikiMap: s.wikiMap,
+          wikiLayoutMode: s.wikiLayoutMode,
+          wikiPinnedSlugs: s.wikiPinnedSlugs,
           thinkingToolPrefs: s.thinkingToolPrefs,
           tasks: s.tasks.filter(t => t.status === "completed" || t.status === "failed")
         }
