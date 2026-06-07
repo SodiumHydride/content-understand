@@ -2736,3 +2736,78 @@ html[data-locale='en'] {
     border-left: none;
   }
 }
+
+/* ─── Wikilinks ─── */
+.wikilink {
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.wikilink:hover {
+  text-decoration-style: solid;
+  background: var(--color-accent-soft);
+  border-radius: 2px;
+}
+
+.wikilink-broken {
+  color: var(--color-danger);
+  text-decoration-style: dashed;
+  cursor: default;
+}
+
+.wikilink-broken:hover {
+  background: transparent;
+}
+
+/* ─── Backlinks ─── */
+.backlinks-section {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--divider);
+}
+
+.backlinks-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink-600);
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.backlinks-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.backlinks-item {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.backlinks-item:hover {
+  background: var(--color-accent-soft);
+}
+
+.backlinks-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-800);
+}
+
+.backlinks-context {
+  display: block;
+  font-size: 11px;
+  color: var(--color-ink-500);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -29,6 +29,17 @@ CREATE TABLE IF NOT EXISTS pages (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_pages_url ON pages(url) WHERE url != '';
 
+CREATE TABLE IF NOT EXISTS links (
+    source_slug TEXT NOT NULL,
+    target_slug TEXT NOT NULL,
+    context TEXT,
+    PRIMARY KEY (source_slug, target_slug),
+    FOREIGN KEY (source_slug) REFERENCES pages(slug) ON DELETE CASCADE,
+    FOREIGN KEY (target_slug) REFERENCES pages(slug) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_slug);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
     url TEXT NOT NULL,
@@ -107,6 +118,53 @@ def list_all_slugs(conn: sqlite3.Connection) -> set[str]:
     """Return all slug values currently in the index."""
     rows = conn.execute("SELECT slug FROM pages").fetchall()
     return {row[0] for row in rows}
+
+
+def upsert_link(conn: sqlite3.Connection, source_slug: str, target_slug: str, context: str | None = None) -> None:
+    """Insert or replace a wikilink edge."""
+    conn.execute(
+        "INSERT OR REPLACE INTO links (source_slug, target_slug, context) VALUES (?, ?, ?)",
+        (source_slug, target_slug, context),
+    )
+    conn.commit()
+
+
+def delete_links_for_source(conn: sqlite3.Connection, source_slug: str) -> None:
+    """Delete all outgoing links from a source page."""
+    conn.execute("DELETE FROM links WHERE source_slug=?", (source_slug,))
+    conn.commit()
+
+
+def get_backlinks(conn: sqlite3.Connection, target_slug: str) -> list[dict[str, Any]]:
+    """Return all incoming links to target_slug, joined with source page title."""
+    rows = conn.execute(
+        """
+        SELECT l.source_slug, p.title AS source_title, l.context
+        FROM links l
+        JOIN pages p ON p.slug = l.source_slug
+        WHERE l.target_slug = ?
+        ORDER BY p.title
+        """,
+        (target_slug,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_links(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Return all link edges for graph building."""
+    rows = conn.execute(
+        "SELECT source_slug, target_slug, context FROM links"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_titles(conn: sqlite3.Connection, limit: int = 500) -> list[str]:
+    """Return all page titles, most-recent first. Used for wikilink suggestions."""
+    rows = conn.execute(
+        "SELECT title FROM pages WHERE title != '' ORDER BY updated DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [row[0] for row in rows]
 
 
 def list_pages(conn: sqlite3.Connection, limit: int = 200) -> list[dict[str, Any]]:

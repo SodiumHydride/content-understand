@@ -14,6 +14,32 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+def build_wikilink_instruction(titles: list[str], lang: str = "zh") -> str:
+    """Build a prompt fragment instructing the model to use [[wikilinks]].
+
+    Returns an empty string when *titles* is empty (nothing to link to).
+    """
+    if not titles:
+        return ""
+
+    title_list = "\n".join(f"- {t}" for t in titles)
+    if lang == "zh":
+        return (
+            "\n\n## 已有笔记（可用 [[wikilinks]] 引用）\n"
+            "以下是知识库中已有的笔记标题。在输出中引用相关内容时，"
+            "请使用 Obsidian 风格的双链语法 `[[笔记标题]]` 或 `[[笔记标题|显示文本]]`。\n"
+            "只在内容确实相关时才创建链接，不要为了链接而链接。\n\n"
+            f"{title_list}"
+        )
+    return (
+        "\n\n## Existing notes (use [[wikilinks]] to reference)\n"
+        "Below are titles of notes already in the vault. When referencing related content "
+        "in your output, use Obsidian-style wikilink syntax `[[note title]]` or "
+        "`[[note title|display text]]`. Only link when genuinely relevant.\n\n"
+        f"{title_list}"
+    )
+
+
 def slugify(text: str, max_len: int = 80) -> str:
     text = re.sub(r"[^\w一-鿿぀-ヿ-]", "_", text)
     text = re.sub(r"_+", "_", text).strip("_")

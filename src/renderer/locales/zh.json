@@ -170,6 +170,9 @@
     "noMatch": "没有匹配的笔记",
     "noMatchHint": "换个关键词试试，或清除筛选条件"
   },
+  "note": {
+    "backlinks": "反向链接"
+  },
   "preview": {
     "empty": "选择一条笔记预览",
     "pin": "贴上便签架",

@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useQuery } from '@tanstack/react-query'
 import { Download, ExternalLink, FolderOpen, Pin, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
-import { fetchPage } from '../lib/sidecar'
+import { fetchPage, fetchBacklinks } from '../lib/sidecar'
+import { splitTextWithWikilinks, resolveWikilinkTarget } from '../lib/wikilink'
 import {
   normalizeShelfType,
   platformLabel,
@@ -15,6 +17,37 @@ import {
 import type { ReaderPresentation } from '../lib/readerPresentation'
 import { getReaderPresentation } from '../lib/readerPresentation'
 import type { LibraryItem } from '../stores/types'
+
+function WikilinkText({ text, onNavigate }: { text: string; onNavigate: (slug: string) => void }) {
+  const library = useAppStore((s) => s.library)
+  const segments = splitTextWithWikilinks(text)
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.kind === 'text') return seg.value
+        const slug = resolveWikilinkTarget(seg.target, library)
+        if (slug) {
+          return (
+            <span
+              key={i}
+              className="wikilink"
+              onClick={(e) => { e.stopPropagation(); onNavigate(slug) }}
+              role="link"
+              tabIndex={0}
+            >
+              {seg.display}
+            </span>
+          )
+        }
+        return (
+          <span key={i} className="wikilink wikilink-broken" title={`Not found: ${seg.target}`}>
+            {seg.display}
+          </span>
+        )
+      })}
+    </>
+  )
+}
 
 export function NotePreview({
   presentation = 'sidebar'
@@ -31,6 +64,31 @@ export function NotePreview({
   const closeReader = useAppStore((s) => s.closeReader)
   const togglePin = useAppStore((s) => s.togglePin)
   const isPinned = useAppStore((s) => s.isPinned)
+
+  const { data: backlinksData } = useQuery({
+    queryKey: ['backlinks', selectedSlug],
+    queryFn: () => fetchBacklinks(selectedSlug!),
+    enabled: !!selectedSlug,
+  })
+  const backlinks = backlinksData ?? []
+
+  const markdownComponents = useMemo(() => {
+    const wrapText = (children: React.ReactNode): React.ReactNode => {
+      return React.Children.map(children, (child) => {
+        if (typeof child === 'string') {
+          return <WikilinkText text={child} onNavigate={(slug) => selectItem(slug, { reader: true })} />
+        }
+        return child
+      })
+    }
+
+    return {
+      p: ({ children, ...props }: any) => <p {...props}>{wrapText(children)}</p>,
+      li: ({ children, ...props }: any) => <li {...props}>{wrapText(children)}</li>,
+      td: ({ children, ...props }: any) => <td {...props}>{wrapText(children)}</td>,
+      th: ({ children, ...props }: any) => <th {...props}>{wrapText(children)}</th>,
+    }
+  }, [selectItem])
 
   const [detail, setDetail] = useState<LibraryItem | null>(null)
 
@@ -204,10 +262,25 @@ export function NotePreview({
           <article className="note-reader-column">
             {detail.summary && <p className="note-reader-lead">{detail.summary}</p>}
             <div className="note-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                 {detail.body || detail.summary}
               </ReactMarkdown>
             </div>
+            {backlinks.length > 0 && (
+              <div className="backlinks-section">
+                <h3 className="backlinks-heading">
+                  {t('note.backlinks')} ({backlinks.length})
+                </h3>
+                <ul className="backlinks-list">
+                  {backlinks.map((bl) => (
+                    <li key={bl.slug} className="backlinks-item" onClick={() => selectItem(bl.slug, { reader: true })}>
+                      <span className="backlinks-title">{bl.title}</span>
+                      {bl.context && <span className="backlinks-context">{bl.context}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </article>
         )}
       </div>

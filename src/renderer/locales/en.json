@@ -170,6 +170,9 @@
     "noMatch": "No matching notes",
     "noMatchHint": "Try another keyword or clear filters"
   },
+  "note": {
+    "backlinks": "Backlinks"
+  },
   "preview": {
     "pin": "Pin to wall",
     "unpin": "Unpin",

@@ -617,3 +617,50 @@ export async function setModalityModel(
     return false
   }
 }
+
+// ── Wikilinks / Graph ──
+
+export interface BacklinkItem {
+  slug: string
+  title: string
+  context: string | null
+}
+
+export async function fetchBacklinks(slug: string): Promise<BacklinkItem[]> {
+  const base = await getBase()
+  if (!base) return []
+  try {
+    const r = await fetch(`${base}/v1/links/backlinks?slug=${encodeURIComponent(slug)}`)
+    if (!r.ok) return []
+    const data = (await r.json()) as { backlinks: BacklinkItem[] }
+    return data.backlinks ?? []
+  } catch {
+    return []
+  }
+}
+
+export interface GraphNode {
+  slug: string
+  title: string
+  type: string
+  summary: string | null
+  tags: string[]
+}
+
+export interface GraphEdge {
+  source_slug: string
+  target_slug: string
+  context: string | null
+}
+
+export async function fetchGraph(): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  const base = await getBase()
+  if (!base) return { nodes: [], edges: [] }
+  try {
+    const r = await fetch(`${base}/v1/links/graph`)
+    if (!r.ok) return { nodes: [], edges: [] }
+    return (await r.json()) as { nodes: GraphNode[]; edges: GraphEdge[] }
+  } catch {
+    return { nodes: [], edges: [] }
+  }
+}

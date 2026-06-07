@@ -5,10 +5,66 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from engine.index.db import get_page_mtime, list_all_slugs, open_db, upsert_page
+from engine.index.db import (
+    delete_links_for_source,
+    get_page_mtime,
+    list_all_slugs,
+    open_db,
+    upsert_link,
+    upsert_page,
+)
+
+_WIKILINK_RE = re.compile(r'\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]')
+
+
+def extract_wikilinks(body: str) -> list[str]:
+    """Extract [[wikilink]] targets from markdown body."""
+    return [m.group(1).strip() for m in _WIKILINK_RE.finditer(body)]
+
+
+def _resolve_wikilink_targets(
+    conn, wikilinks: list[str]
+) -> list[tuple[str, str]]:
+    """Resolve wikilink display names to (raw_link, target_slug) pairs.
+
+    Matches each link against page title or slug. Returns only those
+    that resolve to an existing page.
+    """
+    if not wikilinks:
+        return []
+
+    all_pages = conn.execute("SELECT slug, title FROM pages").fetchall()
+    title_map: dict[str, str] = {}
+    slug_set: set[str] = set()
+    for row in all_pages:
+        slug_set.add(row[0])
+        if row[1]:
+            title_map[row[1].lower()] = row[0]
+
+    resolved = []
+    for link in wikilinks:
+        slug = title_map.get(link.lower())
+        if slug is None and link in slug_set:
+            slug = link
+        if slug is not None:
+            resolved.append((link, slug))
+    return resolved
+
+
+def _wikilink_context(body: str, match_start: int, match_end: int, width: int = 80) -> str:
+    """Extract ~width chars of surrounding context around a wikilink match."""
+    start = max(0, match_start - width // 2)
+    end = min(len(body), match_end + width // 2)
+    ctx = body[start:end].replace("\n", " ").strip()
+    if start > 0:
+        ctx = "..." + ctx
+    if end < len(body):
+        ctx = ctx + "..."
+    return ctx
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -78,6 +134,19 @@ def upsert_single_file(vault_path: Path, md_path: Path) -> bool:
             "file_mtime": disk_mtime,
         },
     )
+
+    # Extract and store wikilinks from the body
+    wikilinks = extract_wikilinks(body)
+    delete_links_for_source(conn, slug)
+    if wikilinks:
+        resolved = _resolve_wikilink_targets(conn, wikilinks)
+        for match in _WIKILINK_RE.finditer(body):
+            raw = match.group(1).strip()
+            target_slug = next((s for r, s in resolved if r == raw), None)
+            if target_slug is not None:
+                ctx = _wikilink_context(body, match.start(), match.end())
+                upsert_link(conn, slug, target_slug, ctx)
+
     return True
 
 

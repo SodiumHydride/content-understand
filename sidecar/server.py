@@ -916,6 +916,50 @@ def export_page(slug: str):
     return PlainTextResponse(md_path.read_text(encoding="utf-8"), media_type="text/markdown")
 
 
+@app.get("/v1/links/backlinks")
+def get_backlinks(slug: str):
+    from engine.index.db import get_backlinks, open_db
+    from engine.paths import vault_dir
+    db_path = vault_dir() / ".content-app" / "index.db"
+    if not db_path.exists():
+        return {"backlinks": []}
+    conn = open_db(str(db_path))
+    try:
+        rows = get_backlinks(conn, slug)
+        return {"backlinks": rows}
+    finally:
+        conn.close()
+
+
+@app.get("/v1/links/graph")
+def get_graph():
+    from engine.index.db import get_all_links, open_db
+    from engine.paths import vault_dir
+    db_path = vault_dir() / ".content-app" / "index.db"
+    if not db_path.exists():
+        return {"nodes": [], "edges": []}
+    conn = open_db(str(db_path))
+    try:
+        # Get all pages as nodes
+        rows = conn.execute(
+            "SELECT slug, title, type, summary, tags FROM pages"
+        ).fetchall()
+        nodes = []
+        for r in rows:
+            nodes.append({
+                "slug": r[0],
+                "title": r[1],
+                "type": r[2],
+                "summary": r[3],
+                "tags": json.loads(r[4]) if r[4] else [],
+            })
+        # Get all links as edges
+        edges = get_all_links(conn)
+        return {"nodes": nodes, "edges": edges}
+    finally:
+        conn.close()
+
+
 @app.post("/v1/ingest")
 def ingest(req: IngestRequest):
     _cleanup_stale_jobs()

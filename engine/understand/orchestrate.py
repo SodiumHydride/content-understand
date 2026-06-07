@@ -12,6 +12,37 @@ from engine.understand.config import ContentConfig
 
 logger = logging.getLogger(__name__)
 
+
+def _inject_wikilink_context(config: ContentConfig) -> None:
+    """Fetch existing note titles from the vault index and append a wikilink
+    instruction to the config's prompt_template so the AI model will emit
+    ``[[wikilinks]]`` when referencing related notes.
+
+    Silently no-ops when the index is empty or unavailable.
+    """
+    try:
+        from engine.paths import vault_dir
+        from engine.index.db import list_titles, open_db
+        from engine.write.markdown import build_wikilink_instruction
+
+        vault = vault_dir()
+        conn = open_db(vault)
+        titles = list_titles(conn)
+        if not titles:
+            return
+
+        lang = config.output_language or "zh"
+        snippet = build_wikilink_instruction(titles, lang=lang)
+        if snippet:
+            if config.prompt_template:
+                config.prompt_template += snippet
+            else:
+                # No custom template set — store the snippet so the pipeline
+                # can prepend it to the default prompt at runtime.
+                config.prompt_template = snippet
+    except Exception as exc:
+        logger.debug("Wikilink context injection skipped: %s", exc)
+
 ProgressFn = Callable[[str, int, str], None]
 
 _KINDS = ("video", "image", "audio", "article")
@@ -171,6 +202,7 @@ def understand_path(
         cfg.output_language = output_language
     if prompt_template:
         cfg.prompt_template = prompt_template
+    _inject_wikilink_context(cfg)
     pipeline = _build_pipeline(cfg, on_progress)
 
     try:
@@ -225,6 +257,7 @@ def understand_url(
         cfg.output_language = output_language
     if prompt_template:
         cfg.prompt_template = prompt_template
+    _inject_wikilink_context(cfg)
     _validate_ingest_url(url)
     pipeline = _build_pipeline(cfg, on_progress)
     return pipeline.understand(url, on_progress=on_progress, output_format=output_format)
