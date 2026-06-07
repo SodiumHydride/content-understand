@@ -53,9 +53,17 @@ export function WikiEdgeLayer({ layout, highlightSlug }: WikiEdgeLayerProps): Re
 
   const edges = useMemo(() => {
     if (!graph?.edges) return []
-    return graph.edges.filter(
-      (e) => layout[e.source_slug] && layout[e.target_slug]
-    )
+    // Deduplicate bidirectional edges — only render one line per pair
+    const seen = new Set<string>()
+    return graph.edges.filter((e) => {
+      if (!layout[e.source_slug] || !layout[e.target_slug]) return false
+      const key = e.source_slug < e.target_slug
+        ? `${e.source_slug}|${e.target_slug}`
+        : `${e.target_slug}|${e.source_slug}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
   }, [graph?.edges, layout])
 
   // Compute SVG dimensions from layout extents
