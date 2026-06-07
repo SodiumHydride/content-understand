@@ -920,10 +920,11 @@ def export_page(slug: str):
 def get_backlinks(slug: str):
     from engine.index.db import get_backlinks, open_db
     from engine.paths import vault_dir
-    db_path = vault_dir() / ".content-app" / "index.db"
+    vp = vault_dir()
+    db_path = vp / ".content-app" / "index.db"
     if not db_path.exists():
         return {"backlinks": []}
-    conn = open_db(str(db_path))
+    conn = open_db(vp)
     try:
         rows = get_backlinks(conn, slug)
         return {"backlinks": rows}
@@ -946,7 +947,7 @@ def create_link(body: CreateLinkPayload):
     if not db_path.exists():
         raise HTTPException(404, "Index not found")
 
-    conn = open_db(str(db_path))
+    conn = open_db(vp)
     try:
         # Get target title for wikilink context
         row = conn.execute(
@@ -982,10 +983,11 @@ def _append_wikilink_to_file(vp: Path, source_slug: str, target_title: str) -> N
 def get_graph():
     from engine.index.db import get_all_links, open_db
     from engine.paths import vault_dir
-    db_path = vault_dir() / ".content-app" / "index.db"
+    vp = vault_dir()
+    db_path = vp / ".content-app" / "index.db"
     if not db_path.exists():
         return {"nodes": [], "edges": []}
-    conn = open_db(str(db_path))
+    conn = open_db(vp)
     try:
         # Get all pages as nodes
         rows = conn.execute(
