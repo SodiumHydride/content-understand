@@ -614,16 +614,9 @@ def _clear_pid() -> None:
         pass
 
 
-def _is_process_alive(pid: int) -> bool:
-    """Check if a process with *pid* is still running."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
-
-
 def stop_shared_daemon() -> None:
+    from .port_utils import is_pid_alive, kill_process_by_pid
+
     global _daemon
     if _daemon is not None:
         _daemon.stop()
@@ -632,20 +625,13 @@ def stop_shared_daemon() -> None:
     else:
         # _daemon is None (sidecar restarted) — use PID file to find orphan.
         pid = _read_pid()
-        if pid is not None and _is_process_alive(pid):
+        if pid is not None and is_pid_alive(pid):
             # Verify it's actually our app Ollama binary
             cmdline = _get_process_cmdline(pid)
             expected_binary = find_app_binary(app_data_root() / "runtime")
             if cmdline and expected_binary and str(expected_binary) in cmdline:
                 logger.info("Stopping orphaned app Ollama (PID %d)", pid)
-                import signal as _signal
-                try:
-                    os.kill(pid, _signal.SIGTERM)
-                except OSError:
-                    try:
-                        os.kill(pid, _signal.SIGKILL)
-                    except OSError:
-                        pass
+                kill_process_by_pid(pid)
         _clear_pid()
 
 

@@ -175,7 +175,8 @@ class ContentPreprocessor:
         if detected_type in ("video", "audio") and not shutil.which("ffmpeg"):
             logger.error(
                 "ffmpeg is not installed. %s processing will be degraded.\n"
-                "Install: brew install ffmpeg (macOS) | apt install ffmpeg (Linux)",
+                "Install: brew install ffmpeg (macOS) | apt install ffmpeg (Linux) | "
+                "winget install ffmpeg (Windows)",
                 detected_type.capitalize(),
             )
 

@@ -68,7 +68,13 @@ def _ensure_local_ready(
     # Ensure ffmpeg is available for video/audio processing
     try:
         from engine.runtime.ffmpeg_manager import ensure_ffmpeg
-        ensure_ffmpeg(app_data_root(), on_progress)
+        ffmpeg_path = ensure_ffmpeg(app_data_root(), on_progress)
+        if not ffmpeg_path:
+            logger.warning(
+                "ffmpeg not available for this platform — "
+                "video/audio processing will be degraded. "
+                "Install ffmpeg manually and ensure it is in PATH."
+            )
     except Exception as e:
         logger.warning("ffmpeg setup failed (video processing may be limited): %s", e)
 
