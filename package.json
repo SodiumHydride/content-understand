@@ -1,6 +1,6 @@
 {
   "name": "content-understand",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Multimodal content understanding with a polished desktop UI",
   "main": "out/main/index.js",
