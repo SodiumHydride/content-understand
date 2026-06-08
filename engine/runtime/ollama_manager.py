@@ -359,6 +359,34 @@ def _download_with_progress(url: str, dest: Path, on_progress: ProgressFn | None
                     })
 
 
+def _extract_zip_with_retry(zf: zipfile.ZipFile, dest_dir: Path) -> None:
+    """Extract zip one file at a time, handling Windows DLL locks.
+
+    On Windows, loaded DLLs (e.g. vulkan-1.dll) cannot be deleted but CAN be
+    renamed.  When a file is locked, rename it aside and re-extract the fresh
+    copy.  The stale rename is cleaned up on next reboot or manual deletion.
+    """
+    import uuid
+
+    for info in zf.infolist():
+        target = dest_dir / info.filename
+        try:
+            zf.extract(info, dest_dir)
+        except PermissionError:
+            # Rename the locked file aside, then re-extract
+            stump = target.with_suffix(target.suffix + f".old.{uuid.uuid4().hex[:8]}")
+            logger.warning("File locked, renaming %s → %s", target.name, stump.name)
+            try:
+                target.rename(stump)
+            except OSError:
+                logger.error("Cannot rename locked file %s — skipping", target)
+                continue
+            try:
+                zf.extract(info, dest_dir)
+            except Exception as exc:
+                logger.error("Re-extract after rename failed for %s: %s", target, exc)
+
+
 def download_ollama(
     runtime_dir: Path,
     on_progress: ProgressFn | None = None,
@@ -418,7 +446,7 @@ def download_ollama(
                         tf.extractall(dest_dir)
             elif kind == "zip":
                 with zipfile.ZipFile(archive) as zf:
-                    zf.extractall(dest_dir)
+                    _extract_zip_with_retry(zf, dest_dir)
             elif kind == "zst":
                 _extract_zst(archive, dest_dir)
             else:
