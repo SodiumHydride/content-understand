@@ -181,7 +181,7 @@ async def lifespan(app: FastAPI):
         pass
 
 
-app = FastAPI(title="Content Understand Sidecar", version="0.2.4", lifespan=lifespan)
+app = FastAPI(title="Content Understand Sidecar", version="0.2.5", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^(file://|app://|https?://(localhost|127\.0\.0\.1)(:\d+)?$)",
@@ -373,6 +373,16 @@ def _cleanup_stale_jobs() -> None:
 def health():
     vp = vault_path()
     return {"ok": True, "vault": str(vp)}
+
+
+@app.delete("/shutdown")
+async def shutdown_endpoint():
+    """Called by Electron before quit — triggers lifespan cleanup via SIGTERM."""
+    import signal as _sig
+    logger.info("Shutdown requested via /shutdown endpoint")
+    # Send SIGTERM to self so uvicorn's signal handler fires lifespan shutdown
+    os.kill(os.getpid(), _sig.SIGTERM)
+    return {"status": "shutting_down"}
 
 
 @app.get("/v1/paths")

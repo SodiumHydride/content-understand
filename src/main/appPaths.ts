@@ -53,5 +53,7 @@ export function sidecarEnv(paths: AppDataPaths): NodeJS.ProcessEnv {
     CONTENT_VAULT: paths.vault,
     CONTENT_CACHE: paths.cache,
     CONTENT_MODELS: paths.models,
+    PYTHONIOENCODING: 'utf-8',
+    PYTHONUTF8: '1',
   }
 }

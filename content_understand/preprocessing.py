@@ -18,8 +18,10 @@ import os
 import shutil
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Generator
 
 from content_understand.capabilities import (
     ContentBundle,
@@ -28,6 +30,29 @@ from content_understand.capabilities import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _ffmpeg_safe_path(path: str | Path) -> Generator[str, None, None]:
+    """Yield a path safe for ffmpeg on Windows.
+
+    On Windows, ffmpeg may not handle non-ASCII paths (Chinese, Japanese, etc.)
+    in -i arguments.  When the path contains non-ASCII characters, create a
+    temporary symlink with an ASCII-only name and yield that instead.
+    """
+    path = str(path)
+    if os.name != "nt" or path.isascii():
+        yield path
+        return
+    with tempfile.TemporaryDirectory(prefix="cu_ff_") as td:
+        ext = os.path.splitext(path)[1]
+        link = os.path.join(td, f"input{ext}")
+        try:
+            os.symlink(path, link)
+            yield link
+        except OSError:
+            # Symlink may require privileges on some Windows configs; fall back
+            yield path
 
 
 @dataclass
@@ -289,17 +314,17 @@ class ContentPreprocessor:
         if fc.scale:
             vf = f"{vf},{fc.scale}"
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-vf", vf,
-            "-frames:v", str(fc.max_frames),
-            "-q:v", str(fc.quality),
-            str(tmpdir / "frame_%06d.jpg"),
-        ]
-
         try:
-            result = subprocess.run(cmd, capture_output=True, timeout=300)
+            with _ffmpeg_safe_path(video_path) as safe_in:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", safe_in,
+                    "-vf", vf,
+                    "-frames:v", str(fc.max_frames),
+                    "-q:v", str(fc.quality),
+                    str(tmpdir / "frame_%06d.jpg"),
+                ]
+                result = subprocess.run(cmd, capture_output=True, timeout=300)
             if result.returncode != 0:
                 logger.warning("Frame extraction failed: %s",
                                result.stderr.decode(errors="replace")[:300])
@@ -385,17 +410,17 @@ class ContentPreprocessor:
             vf_parts.append(fc.scale)
         vf = ",".join(vf_parts) + ",setpts=N/FRAME_RATE/TB"
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-vf", vf,
-            "-vsync", "vfr",
-            "-frames:v", str(fc.max_frames // 2),  # Reserve half for scene frames
-            "-q:v", str(fc.quality),
-            str(scene_dir / "scene_%06d.jpg"),
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        with _ffmpeg_safe_path(video_path) as safe_in:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", safe_in,
+                "-vf", vf,
+                "-vsync", "vfr",
+                "-frames:v", str(fc.max_frames // 2),  # Reserve half for scene frames
+                "-q:v", str(fc.quality),
+                str(scene_dir / "scene_%06d.jpg"),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=120)
         if result.returncode != 0:
             logger.debug("Scene detection returned %d: %s",
                          result.returncode, result.stderr.decode(errors="replace")[:200])
@@ -424,16 +449,16 @@ class ContentPreprocessor:
         if fc.scale:
             vf = f"{vf},{fc.scale}"
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-vf", vf,
-            "-frames:v", str(remaining_frames),
-            "-q:v", str(fc.quality),
-            str(uniform_dir / "uni_%06d.jpg"),
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, timeout=300)
+        with _ffmpeg_safe_path(video_path) as safe_in:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", safe_in,
+                "-vf", vf,
+                "-frames:v", str(remaining_frames),
+                "-q:v", str(fc.quality),
+                str(uniform_dir / "uni_%06d.jpg"),
+            ]
+            result = subprocess.run(cmd, capture_output=True, timeout=300)
         if result.returncode != 0:
             return []
 
@@ -501,19 +526,19 @@ class ContentPreprocessor:
         tmpdir = tempfile.mkdtemp(prefix="cu_audio_")
         full_audio_path = os.path.join(tmpdir, f"audio_full.{ac.format}")
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-vn",
-            "-acodec", "pcm_s16le" if ac.format == "wav" else "aac",
-            "-ar", str(ac.sample_rate),
-            "-ac", str(ac.channels),
-            "-b:a", ac.bitrate,
-            full_audio_path,
-        ]
-
         try:
-            result = subprocess.run(cmd, capture_output=True, timeout=300)
+            with _ffmpeg_safe_path(video_path) as safe_in:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", safe_in,
+                    "-vn",
+                    "-acodec", "pcm_s16le" if ac.format == "wav" else "aac",
+                    "-ar", str(ac.sample_rate),
+                    "-ac", str(ac.channels),
+                    "-b:a", ac.bitrate,
+                    full_audio_path,
+                ]
+                result = subprocess.run(cmd, capture_output=True, timeout=300)
             if result.returncode != 0:
                 logger.warning("Audio extraction failed: %s",
                                result.stderr.decode(errors="replace")[:200])
@@ -637,19 +662,19 @@ class ContentPreprocessor:
         tmpdir = tempfile.mkdtemp(prefix="cu_audio_")
         output_path = os.path.join(tmpdir, f"audio.{ac.format}")
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-vn",  # No video
-            "-acodec", "pcm_s16le" if ac.format == "wav" else "aac",
-            "-ar", str(ac.sample_rate),
-            "-ac", str(ac.channels),
-            "-b:a", ac.bitrate,
-            output_path,
-        ]
-
         try:
-            result = subprocess.run(cmd, capture_output=True, timeout=300)
+            with _ffmpeg_safe_path(video_path) as safe_in:
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", safe_in,
+                    "-vn",  # No video
+                    "-acodec", "pcm_s16le" if ac.format == "wav" else "aac",
+                    "-ar", str(ac.sample_rate),
+                    "-ac", str(ac.channels),
+                    "-b:a", ac.bitrate,
+                    output_path,
+                ]
+                result = subprocess.run(cmd, capture_output=True, timeout=300)
             if result.returncode == 0 and os.path.exists(output_path):
                 size = os.path.getsize(output_path)
                 logger.info("Extracted audio: %s (%d bytes)", output_path, size)
@@ -671,13 +696,14 @@ class ContentPreprocessor:
     def _get_duration(self, path: str) -> float | None:
         """Get media duration in seconds using ffprobe."""
         try:
-            cmd = [
-                "ffprobe", "-v", "quiet",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                path,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            with _ffmpeg_safe_path(path) as safe_in:
+                cmd = [
+                    "ffprobe", "-v", "quiet",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    safe_in,
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode == 0 and result.stdout.strip():
                 return float(result.stdout.strip())
         except Exception as e:

@@ -1,5 +1,5 @@
 import type { ThinkingStrokeElement } from '../../lib/thinkingCanvas/types'
-import { strokeCircleNodes, strokePathD } from '../../lib/thinkingCanvas/strokeGeometry'
+import { strokePathD, strokePressurePathD } from '../../lib/thinkingCanvas/strokeGeometry'
 
 export function ThinkingCanvasInk({
   strokes,
@@ -46,13 +46,15 @@ export function ThinkingCanvasInk({
           )
         }
 
-        const nodes = strokeCircleNodes(stroke.points, stroke.style.width)
+        const d = strokePressurePathD(stroke.points, stroke.style.width)
+        if (!d) return null
         return (
-          <g key={stroke.id} opacity={stroke.style.opacity}>
-            {nodes.map((n, i) => (
-              <circle key={`${stroke.id}-${i}`} cx={n.cx} cy={n.cy} r={n.r} fill={stroke.style.color} />
-            ))}
-          </g>
+          <path
+            key={stroke.id}
+            d={d}
+            fill={stroke.style.color}
+            opacity={stroke.style.opacity}
+          />
         )
       })}
     </svg>

@@ -41,6 +41,46 @@ export function strokeCircleNodes(
   return nodes
 }
 
+/** Pressure-varying pen stroke as a closed filled outline (continuous, no gaps). */
+export function strokePressurePathD(
+  points: CanvasPoint[],
+  baseWidth: number
+): string {
+  if (points.length < 2) return ''
+  const left: [number, number][] = []
+  const right: [number, number][] = []
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i]!
+    const r = effectivePointWidth(baseWidth, p) / 2
+    let nx = 0
+    let ny = 1
+    if (i < points.length - 1) {
+      const dx = points[i + 1]!.x - p.x
+      const dy = points[i + 1]!.y - p.y
+      const len = Math.hypot(dx, dy) || 1
+      nx = -dy / len
+      ny = dx / len
+    } else if (i > 0) {
+      const dx = p.x - points[i - 1]!.x
+      const dy = p.y - points[i - 1]!.y
+      const len = Math.hypot(dx, dy) || 1
+      nx = -dy / len
+      ny = dx / len
+    }
+    left.push([p.x + nx * r, p.y + ny * r])
+    right.push([p.x - nx * r, p.y - ny * r])
+  }
+  let d = `M ${left[0]![0].toFixed(2)} ${left[0]![1].toFixed(2)}`
+  for (let i = 1; i < left.length; i++) {
+    d += ` L ${left[i]![0].toFixed(2)} ${left[i]![1].toFixed(2)}`
+  }
+  for (let i = right.length - 1; i >= 0; i--) {
+    d += ` L ${right[i]![0].toFixed(2)} ${right[i]![1].toFixed(2)}`
+  }
+  d += ' Z'
+  return d
+}
+
 function dist(a: CanvasPoint, b: CanvasPoint): number {
   return Math.hypot(a.x - b.x, a.y - b.y)
 }

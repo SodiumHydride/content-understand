@@ -218,7 +218,14 @@ async function stopSidecar(): Promise<void> {
     // Wait for graceful exit
     await sleep(3000)
     if (proc.exitCode === null && !proc.killed) {
-      try { execFileSync('taskkill', ['/F', '/PID', String(proc.pid)], { stdio: 'ignore' }) } catch { /* gone */ }
+      try { execFileSync('taskkill', ['/F', '/T', '/PID', String(proc.pid)], { stdio: 'ignore' }) } catch { /* gone */ }
+    }
+    // Verify sidecar port is released (ollama + llama-server killed via tree)
+    for (let i = 0; i < 5; i++) {
+      await sleep(500)
+      try {
+        await fetch(`${SIDECAR_BASE}/health`, { signal: AbortSignal.timeout(500) })
+      } catch { break } // connection refused = process exited
     }
   } else {
     // Unix: SIGTERM gives sidecar a chance to run atexit cleanup

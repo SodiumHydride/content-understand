@@ -54,7 +54,7 @@ def kill_process_by_pid(pid: int, timeout: float = 3.0) -> bool:
         if _IS_WINDOWS:
             # TerminateProcess via taskkill
             subprocess.run(
-                ["taskkill", "/PID", str(pid), "/F"],
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
                 capture_output=True,
                 timeout=int(timeout),
             )
