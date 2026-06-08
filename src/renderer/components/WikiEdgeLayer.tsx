@@ -23,13 +23,13 @@ function buildPath(src: MapNodePos, tgt: MapNodePos): string {
 
   const dx = x2 - x1
   const dy = y2 - y1
-  // Gentle vertical offset ~30% of distance
-  const cy = Math.abs(dy) * 0.3
+  const dist = Math.sqrt(dx * dx + dy * dy)
+  const offset = dist * 0.15
 
   const cx1 = x1 + dx * 0.25
-  const cy1 = y1 + cy
+  const cy1 = y1 + offset
   const cx2 = x1 + dx * 0.75
-  const cy2 = y2 - cy
+  const cy2 = y2 - offset
 
   return `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`
 }

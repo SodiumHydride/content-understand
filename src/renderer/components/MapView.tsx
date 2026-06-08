@@ -826,7 +826,7 @@ export function MapView(): React.JSX.Element {
                     <span className="map-node-title">{item.title}</span>
                     {item.summary && <span className="map-node-summary">{item.summary}</span>}
                     {mapMode === 'wiki' && wikiPinnedSlugs.includes(item.slug) && (
-                      <Pin size={10} className="map-node-pin-icon" aria-label={t('map.menu.unpinNote')} />
+                      <Pin size={12} className="map-node-pin-icon" aria-label={t('map.menu.unpinNote')} />
                     )}
                   </div>
                 )

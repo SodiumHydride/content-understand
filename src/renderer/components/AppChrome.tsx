@@ -7,6 +7,7 @@ import {
   FolderOpen,
   Inbox,
   Link,
+  Loader2,
   Map,
   Search,
   Settings,
@@ -17,6 +18,10 @@ import { searchNotes, type SearchResult } from '../lib/sidecar'
 import { WikilinkSearch } from './WikilinkSearch'
 import type { ViewMode } from '../stores/types'
 import type { AppLocale } from '../lib/i18n'
+
+const sanitizeSnippet = (html: string): string => {
+  return html.replace(/<(?!\/?mark\b)[^>]*>/gi, '')
+}
 
 const MODES: { id: ViewMode; icon: typeof Inbox }[] = [
   { id: 'capture', icon: Inbox },
@@ -79,7 +84,7 @@ export function AppChrome(): React.JSX.Element {
       setSearchResults(results)
       setShowResults(true)
       setSearchLoading(false)
-    }, 300)
+    }, 150)
   }, [setLibraryQuery])
 
   // Cmd+L opens wikilink search
@@ -143,6 +148,11 @@ export function AppChrome(): React.JSX.Element {
                 placeholder={searchPlaceholder}
                 className="toolbar-search"
               />
+              {showResults && searchLoading && (
+                <div className="search-result-loading">
+                  <Loader2 size={14} className="animate-spin" />
+                </div>
+              )}
               {showResults && searchResults.length > 0 && (
                 <div className="search-results-dropdown">
                   {searchResults.map((r) => (
@@ -157,7 +167,7 @@ export function AppChrome(): React.JSX.Element {
                     >
                       <span className="search-result-title">{r.title}</span>
                       {r.snippet && (
-                        <span className="search-result-snippet" dangerouslySetInnerHTML={{ __html: r.snippet }} />
+                        <span className="search-result-snippet" dangerouslySetInnerHTML={{ __html: sanitizeSnippet(r.snippet ?? '') }} />
                       )}
                     </button>
                   ))}

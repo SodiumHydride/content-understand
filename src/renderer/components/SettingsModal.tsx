@@ -98,7 +98,6 @@ export function SettingsModal(): React.JSX.Element | null {
       return
     }
     save()
-    setTimeout(() => setSettingsOpen(false), 800)
   }
 
   // Ordered provider list for display

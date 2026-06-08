@@ -41,6 +41,7 @@ function WikilinkText({ text, onNavigate }: { text: string; onNavigate: (slug: s
               key={i}
               className="wikilink"
               onClick={(e) => { e.stopPropagation(); onNavigate(slug) }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onNavigate(slug) } }}
               role="link"
               tabIndex={0}
             >
@@ -311,7 +312,7 @@ export function NotePreview({
         <div className="flex min-w-0 flex-1 items-start justify-between gap-2">
           {detail ? (
             <div className="min-w-0">
-              <h2 className="note-toolbar-title">{detail.title}</h2>
+              <h2 className="note-toolbar-title" title={detail.title}>{detail.title}</h2>
               <p className="note-toolbar-meta">
                 <span style={{ color: accent }}>{platformLabel(detail.platform)}</span>
                 {detail.tags.length > 0 && (
@@ -524,7 +525,9 @@ export function NotePreview({
 
       {detail && (
         <footer className="note-footer">
-          <div>{detail.path}</div>
+          <p className="note-footer-text">
+            {detail.path.split('/').slice(0, -1).join(' / ') || detail.type}
+          </p>
         </footer>
       )}
     </aside>
