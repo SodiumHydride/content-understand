@@ -82,6 +82,11 @@ const defaultSettings: AppSettings = {
     httpProxy: '',
     githubMirror: '',
     ollamaMirror: ''
+  },
+  typography: {
+    fontFamily: 'serif',
+    fontSize: 16,
+    lineHeight: 1.82
   }
 }
 

@@ -4,6 +4,11 @@ import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import 'katex/dist/katex.min.css'
 import MDEditor from '@uiw/react-md-editor'
 import { useQuery } from '@tanstack/react-query'
 import { Download, Edit3, Eraser, ExternalLink, FolderOpen, Highlighter, Link, Pencil, Pin, Trash2, X } from 'lucide-react'
@@ -62,6 +67,7 @@ export function NotePreview({
   const selectedSlug = useAppStore((s) => s.selectedSlug)
   const library = useAppStore((s) => s.library)
   const settings = useAppStore((s) => s.settings)
+  const typography = useAppStore((s) => s.typography)
   const viewMode = useAppStore((s) => s.viewMode)
   const mapMode = useAppStore((s) => s.mapMode)
   const selectItem = useAppStore((s) => s.selectItem)
@@ -77,6 +83,32 @@ export function NotePreview({
   })
   const backlinks = backlinksData ?? []
 
+  const CodeBlock = useCallback(({ className, children, ...props }: any) => {
+    const match = /language-(\w+)/.exec(className || '')
+    const codeString = String(children).replace(/\n$/, '')
+
+    if (match) {
+      return (
+        <SyntaxHighlighter
+          style={oneLight}
+          language={match[1]}
+          PreTag="div"
+          customStyle={{
+            margin: '1em 0',
+            borderRadius: '8px',
+            fontSize: '0.85em',
+            background: '#f8f6f1',
+          }}
+        >
+          {codeString}
+        </SyntaxHighlighter>
+      )
+    }
+
+    // Inline code
+    return <code className={className} {...props}>{children}</code>
+  }, [])
+
   const markdownComponents = useMemo(() => {
     const wrapText = (children: React.ReactNode): React.ReactNode => {
       return React.Children.map(children, (child) => {
@@ -88,12 +120,13 @@ export function NotePreview({
     }
 
     return {
+      code: CodeBlock,
       p: ({ children, ...props }: any) => <p {...props}>{wrapText(children)}</p>,
       li: ({ children, ...props }: any) => <li {...props}>{wrapText(children)}</li>,
       td: ({ children, ...props }: any) => <td {...props}>{wrapText(children)}</td>,
       th: ({ children, ...props }: any) => <th {...props}>{wrapText(children)}</th>,
     }
-  }, [selectItem])
+  }, [selectItem, CodeBlock])
 
   const [detail, setDetail] = useState<LibraryItem | null>(null)
   const [editMode, setEditMode] = useState(false)
@@ -103,6 +136,20 @@ export function NotePreview({
   const [inkTool, setInkTool] = useState<'pen' | 'highlighter' | 'eraser'>('pen')
   const [penColor, setPenColor] = useState('#1a1a1a')
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Apply typography CSS variables to .note-markdown
+  useEffect(() => {
+    const el = document.querySelector('.note-markdown')
+    if (!el) return
+    const fontMap: Record<string, string> = {
+      serif: 'var(--font-serif)',
+      sans: 'var(--font-sans)',
+      mono: 'var(--font-mono)'
+    }
+    ;(el as HTMLElement).style.setProperty('--reading-font', fontMap[typography.fontFamily])
+    ;(el as HTMLElement).style.setProperty('--reading-size', `${typography.fontSize}px`)
+    ;(el as HTMLElement).style.setProperty('--reading-leading', String(typography.lineHeight))
+  }, [typography])
 
   const penStyle: StrokeStyle = useMemo(() => ({
     color: penColor,
@@ -451,7 +498,7 @@ export function NotePreview({
                   />
                 </div>
               ) : (
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>
                   {detail.body || detail.summary}
                 </ReactMarkdown>
               )}

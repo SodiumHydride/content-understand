@@ -1393,9 +1393,9 @@ html[data-locale='en'] {
 }
 
 .note-markdown {
-  font-family: var(--font-reading);
-  font-size: var(--text-body);
-  line-height: var(--type-prose-leading);
+  font-family: var(--reading-font, var(--font-serif));
+  font-size: var(--reading-size, var(--text-body));
+  line-height: var(--reading-leading, var(--type-prose-leading));
   color: var(--color-ink-800);
 }
 
@@ -1423,6 +1423,151 @@ html[data-locale='en'] {
 
 .note-markdown p {
   margin: 0 0 var(--space-4);
+  text-wrap: pretty;
+}
+
+/* ─── Markdown Typography ─── */
+
+/* Headings */
+.note-markdown h3 {
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: var(--space-5) 0 var(--space-2);
+  color: var(--color-ink-700);
+}
+
+.note-markdown h4,
+.note-markdown h5,
+.note-markdown h6 {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--color-ink-600);
+}
+
+/* Links */
+.note-markdown a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+.note-markdown a:hover {
+  color: var(--color-accent-hover);
+  text-decoration-style: solid;
+}
+
+/* Lists */
+.note-markdown ul,
+.note-markdown ol {
+  margin: 0 0 var(--space-4);
+  padding-left: 1.5em;
+}
+.note-markdown li {
+  margin-bottom: var(--space-1);
+}
+.note-markdown li > p {
+  margin-bottom: var(--space-1);
+}
+
+/* Blockquotes */
+.note-markdown blockquote {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-accent-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-ink-700);
+  font-style: italic;
+}
+.note-markdown blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* Tables */
+.note-markdown table {
+  width: 100%;
+  margin: var(--space-4) 0;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+.note-markdown th {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 2px solid var(--color-ink-300);
+  color: var(--color-ink-700);
+  background: var(--color-shelf);
+}
+.note-markdown td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--divider);
+}
+.note-markdown tr:hover td {
+  background: var(--color-accent-soft);
+}
+
+/* Code (inline) */
+.note-markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  background: var(--color-shelf);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-700);
+}
+
+/* Code blocks (via SyntaxHighlighter) */
+.note-markdown pre {
+  margin: var(--space-4) 0;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+.note-markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+/* Images */
+.note-markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  margin: var(--space-4) 0;
+}
+
+/* Horizontal rule */
+.note-markdown hr {
+  border: none;
+  border-top: 1px solid var(--divider);
+  margin: var(--space-6) 0;
+}
+
+/* KaTeX math */
+.note-markdown .katex-display {
+  margin: var(--space-4) 0;
+  overflow-x: auto;
+}
+.note-markdown .katex {
+  font-size: 1.1em;
+}
+
+/* Strong and em */
+.note-markdown strong {
+  font-weight: 600;
+  color: var(--color-ink-900);
+}
+.note-markdown em {
+  font-style: italic;
+}
+
+/* Task lists (GFM) */
+.note-markdown input[type="checkbox"] {
+  margin-right: 0.4em;
 }
 
 .note-footer {

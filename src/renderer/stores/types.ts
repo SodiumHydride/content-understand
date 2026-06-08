@@ -133,6 +133,18 @@ export interface AppSettings {
 
   // ── Network / Proxy ──
   proxySettings: ProxySettings
+
+  // ── Typography ──
+  typography: TypographySettings
+}
+
+export interface TypographySettings {
+  /** Font family for reading: 'serif' | 'sans' | 'mono' */
+  fontFamily: 'serif' | 'sans' | 'mono'
+  /** Font size in px (12-24) */
+  fontSize: number
+  /** Line height multiplier (1.2-2.2) */
+  lineHeight: number
 }
 
 /** Proxy and mirror settings for downloads. */

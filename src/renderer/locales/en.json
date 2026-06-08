@@ -281,7 +281,11 @@
     "dataManagement": "Data Management",
     "dataSize": "Storage used",
     "openDataFolder": "Open Data Folder",
-    "deleteAllData": "Delete All Data"
+    "deleteAllData": "Delete All Data",
+    "typography": "Typography",
+    "fontFamily": "Font family",
+    "fontSize": "Font size",
+    "lineHeight": "Line height"
   },
   "setup": {
     "localReady": "Local engine is ready",

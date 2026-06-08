@@ -180,6 +180,60 @@ export function SettingsModal(): React.JSX.Element | null {
                     {t('settings.promptTemplateHint')}
                   </p>
                 </Field>
+
+                <Section title={t('settings.typography')}>
+                  <Field label={t('settings.fontFamily')}>
+                    <select
+                      value={settings.typography?.fontFamily ?? 'serif'}
+                      onChange={(e) => updateSettings({
+                        typography: { ...settings.typography, fontFamily: e.target.value as any }
+                      })}
+                      className="settings-input text-[12px]"
+                    >
+                      <option value="serif">{isZh ? '宋体/衬线' : 'Serif (Georgia)'}</option>
+                      <option value="sans">{isZh ? '黑体/无衬线' : 'Sans-serif (Inter)'}</option>
+                      <option value="mono">{isZh ? '等宽' : 'Monospace'}</option>
+                    </select>
+                  </Field>
+
+                  <Field label={t('settings.fontSize')}>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={12}
+                        max={24}
+                        step={1}
+                        value={settings.typography?.fontSize ?? 16}
+                        onChange={(e) => updateSettings({
+                          typography: { ...settings.typography, fontSize: Number(e.target.value) }
+                        })}
+                        className="flex-1"
+                      />
+                      <span className="text-[11px] text-ink-500 w-8 text-right">
+                        {settings.typography?.fontSize ?? 16}px
+                      </span>
+                    </div>
+                  </Field>
+
+                  <Field label={t('settings.lineHeight')}>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={1.2}
+                        max={2.2}
+                        step={0.1}
+                        value={settings.typography?.lineHeight ?? 1.82}
+                        onChange={(e) => updateSettings({
+                          typography: { ...settings.typography, lineHeight: Number(e.target.value) }
+                        })}
+                        className="flex-1"
+                      />
+                      <span className="text-[11px] text-ink-500 w-8 text-right">
+                        {(settings.typography?.lineHeight ?? 1.82).toFixed(2)}
+                      </span>
+                    </div>
+                  </Field>
+                </Section>
               </div>
             )}
 

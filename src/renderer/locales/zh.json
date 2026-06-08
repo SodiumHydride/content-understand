@@ -281,7 +281,11 @@
     "dataManagement": "数据管理",
     "dataSize": "占用空间",
     "openDataFolder": "打开数据文件夹",
-    "deleteAllData": "删除所有数据"
+    "deleteAllData": "删除所有数据",
+    "typography": "排版",
+    "fontFamily": "字体",
+    "fontSize": "字号",
+    "lineHeight": "行高"
   },
   "setup": {
     "localReady": "本地引擎已就绪",
