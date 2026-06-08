@@ -137,7 +137,14 @@ def app_binary_path(runtime_dir: Path) -> Path:
 def llama_server_path(runtime_dir: Path) -> Path:
     system = platform.system().lower()
     name = "llama-server.exe" if system == "windows" else "llama-server"
-    return app_ollama_dir(runtime_dir) / name
+    top = app_ollama_dir(runtime_dir) / name
+    if top.exists():
+        return top
+    # Windows zip nests binaries under lib/ollama/
+    nested = app_ollama_dir(runtime_dir) / "lib" / "ollama" / name
+    if nested.exists():
+        return nested
+    return top
 
 
 def is_app_binary(path: Path | None, runtime_dir: Path) -> bool:
@@ -419,6 +426,8 @@ def download_ollama(
 
         if not binary.exists():
             raise RuntimeError("ollama binary not found after extraction")
+        # Re-resolve after extraction — Windows zip nests llama-server under lib/ollama/
+        server = llama_server_path(runtime_dir)
         if not server.exists():
             raise RuntimeError(
                 "llama-server not found after extraction — vision models will not work"
@@ -427,6 +436,8 @@ def download_ollama(
         if platform.system().lower() != "windows":
             for name in ("ollama", "llama-server", "llama-quantize"):
                 p = dest_dir / name
+                if not p.exists():
+                    p = dest_dir / "lib" / "ollama" / name
                 if p.exists():
                     p.chmod(p.stat().st_mode | 0o755)
 
@@ -451,6 +462,8 @@ def _post_install_macos(dest_dir: Path) -> None:
         )
         for name in ("ollama", "llama-server", "llama-quantize"):
             p = dest_dir / name
+            if not p.exists():
+                p = dest_dir / "lib" / "ollama" / name
             if p.exists():
                 subprocess.run(
                     ["codesign", "--force", "--sign", "-", str(p)],

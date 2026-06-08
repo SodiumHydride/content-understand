@@ -498,7 +498,7 @@ export function SettingsModal(): React.JSX.Element | null {
                   {t('settings.aboutText')}
                 </p>
                 <p className="text-xs text-ink-600">
-                  {t('settings.version')}: 0.2.0
+                  {t('settings.version')}: 0.2.1
                 </p>
                 <DataManagement />
               </div>
