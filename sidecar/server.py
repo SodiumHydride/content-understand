@@ -181,7 +181,7 @@ async def lifespan(app: FastAPI):
         pass
 
 
-app = FastAPI(title="Content Understand Sidecar", version="0.2.3", lifespan=lifespan)
+app = FastAPI(title="Content Understand Sidecar", version="0.2.4", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^(file://|app://|https?://(localhost|127\.0\.0\.1)(:\d+)?$)",
