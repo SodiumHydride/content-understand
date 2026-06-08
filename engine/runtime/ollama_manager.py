@@ -390,6 +390,10 @@ def download_ollama(
     if is_app_ollama_partial(runtime_dir):
         logger.warning("App Ollama install incomplete (missing llama-server); re-extracting")
 
+    # Stop daemon before re-extraction so DLLs (vulkan-1.dll etc.) are not locked
+    if binary.exists():
+        stop_shared_daemon()
+
     if on_progress:
         on_progress("download", 5, f"Ollama {OLLAMA_VERSION}")
 
