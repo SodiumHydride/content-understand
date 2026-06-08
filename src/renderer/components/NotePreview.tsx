@@ -122,6 +122,26 @@ export function NotePreview({
 
     return {
       code: CodeBlock,
+      a: ({ href, children, ...props }: any) => {
+        // External links: open in system browser, don't navigate the app
+        if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+          return (
+            <a
+              href={href}
+              onClick={(e) => {
+                e.preventDefault()
+                window.open(href, '_blank', 'noopener,noreferrer')
+              }}
+              target="_blank"
+              rel="noopener noreferrer"
+              {...props}
+            >
+              {children}
+            </a>
+          )
+        }
+        return <a href={href} {...props}>{children}</a>
+      },
       p: ({ children, ...props }: any) => <p {...props}>{wrapText(children)}</p>,
       li: ({ children, ...props }: any) => <li {...props}>{wrapText(children)}</li>,
       td: ({ children, ...props }: any) => <td {...props}>{wrapText(children)}</td>,
