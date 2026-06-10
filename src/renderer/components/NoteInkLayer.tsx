@@ -137,7 +137,7 @@ export function NoteInkLayer({
     let cancelled = false
     ;(async () => {
       const raw = await fetchNoteInk(slug)
-      if (cancelled) return
+      if (cancelled || !raw) return
       const loaded = deserializeStrokes(raw)
       setStrokes(loaded)
       // Ensure z-index counter stays ahead of loaded strokes

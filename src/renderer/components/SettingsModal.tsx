@@ -5,8 +5,9 @@ import { X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import type { AppLocale } from '../lib/i18n'
 import { useState, useEffect } from 'react'
+import { useFocusTrap } from '../hooks/useFocusTrap'
 import { rebuildIndex, exportCookies } from '../lib/sidecar'
-import type { InferenceMode } from '../stores/types'
+import type { InferenceMode, TypographySettings } from '../stores/types'
 import { Select, type SelectOption } from './Select'
 import { ProviderCard } from './ProviderCard'
 import { ModalityRouter } from './ModalityRouter'
@@ -18,8 +19,7 @@ type SettingsTab = 'general' | 'vault' | 'models' | 'logs' | 'advanced' | 'about
 const tabs: SettingsTab[] = ['general', 'vault', 'models', 'logs', 'advanced', 'about']
 
 export function SettingsModal(): React.JSX.Element | null {
-  const { t, i18n } = useTranslation()
-  const isZh = i18n.language.startsWith('zh')
+  const { t } = useTranslation()
   const open = useAppStore((s) => s.settingsOpen)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
   const settings = useAppStore((s) => s.settings)
@@ -35,35 +35,13 @@ export function SettingsModal(): React.JSX.Element | null {
   const [saveError, setSaveError] = useState<string | null>(null)
 
   // Focus trap + Escape handler
+  useFocusTrap('.modal-panel.settings-shell', open)
   useEffect(() => {
     if (!open) return
-    const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    const panel = document.querySelector('.modal-panel.settings-shell')
-    if (!panel) return
-    const elements = (Array.from(panel.querySelectorAll(FOCUSABLE)) as HTMLElement[])
-      .filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
-    if (elements.length > 0) {
-      setTimeout(() => elements[0].focus(), 0)
-    }
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
         setSettingsOpen(false)
-        return
-      }
-      if (e.key !== 'Tab' || elements.length === 0) return
-      const first = elements[0]
-      const last = elements[elements.length - 1]
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault()
-          last.focus()
-        }
-      } else {
-        if (document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
       }
     }
     window.addEventListener('keydown', handleKey)
@@ -167,6 +145,18 @@ export function SettingsModal(): React.JSX.Element | null {
                   />
                 </Field>
 
+                <Field label={t('settings.theme')}>
+                  <Select
+                    value={settings.theme || 'system'}
+                    options={[
+                      { value: 'system', label: t('settings.themeSystem') },
+                      { value: 'light', label: t('settings.themeLight') },
+                      { value: 'dark', label: t('settings.themeDark') }
+                    ]}
+                    onChange={(v) => updateSettings({ theme: v as 'light' | 'dark' | 'system' })}
+                  />
+                </Field>
+
                 <Field label={t('settings.promptTemplate')}>
                   <textarea
                     value={settings.promptTemplate || ''}
@@ -185,13 +175,13 @@ export function SettingsModal(): React.JSX.Element | null {
                     <select
                       value={settings.typography?.fontFamily ?? 'serif'}
                       onChange={(e) => updateSettings({
-                        typography: { ...settings.typography, fontFamily: e.target.value as any }
+                        typography: { ...settings.typography, fontFamily: e.target.value as TypographySettings['fontFamily'] }
                       })}
                       className="settings-input text-[12px]"
                     >
-                      <option value="serif">{isZh ? '宋体/衬线' : 'Serif (Georgia)'}</option>
-                      <option value="sans">{isZh ? '黑体/无衬线' : 'Sans-serif (Inter)'}</option>
-                      <option value="mono">{isZh ? '等宽' : 'Monospace'}</option>
+                      <option value="serif">{t('settings.fontSerif')}</option>
+                      <option value="sans">{t('settings.fontSans')}</option>
+                      <option value="mono">{t('settings.fontMono')}</option>
                     </select>
                   </Field>
 
@@ -291,13 +281,12 @@ export function SettingsModal(): React.JSX.Element | null {
 
                 {/* ── Local inference (Ollama) ── */}
                 <OllamaPanel
-                  isZh={isZh}
                   useUserOllama={settings.useOllamaIfAvailable}
                   onUseUserOllamaChange={(value) => updateSettings({ useOllamaIfAvailable: value })}
                 />
 
                 {/* ── Cloud Providers ── */}
-                <Section title={isZh ? '云端 Provider' : 'Cloud Providers'}>
+                <Section title={t('settings.cloudProviders')}>
                   {providerOrder.map((pid) => {
                     const provider = settings.providers[pid]
                     if (!provider) return null
@@ -306,21 +295,19 @@ export function SettingsModal(): React.JSX.Element | null {
                         key={pid}
                         provider={provider}
                         onChange={(patch) => updateProvider(pid, patch)}
-                        isZh={isZh}
                       />
                     )
                   })}
                 </Section>
 
                 {/* ── Modality Router ── */}
-                <Section title={isZh ? '模态路由' : 'Modality Router'}>
+                <Section title={t('settings.modalityRouter')}>
                   <ModalityRouter
                     providers={settings.providers}
                     defaultProvider={settings.defaultProvider}
                     overrides={settings.modalityOverrides}
                     onDefaultChange={(pid) => updateSettings({ defaultProvider: pid })}
                     onOverrideChange={(modality, route) => setModalityRoute(modality, route)}
-                    isZh={isZh}
                   />
                 </Section>
               </div>
@@ -328,15 +315,15 @@ export function SettingsModal(): React.JSX.Element | null {
 
             {tab === 'logs' && (
               <div className="h-[500px]">
-                <LogViewer isZh={isZh} />
+                <LogViewer />
               </div>
             )}
 
             {tab === 'advanced' && (
               <div className="space-y-4">
                 {/* ── Video Processing ── */}
-                <Section title={isZh ? '视频处理' : 'Video Processing'}>
-                  <Field label={isZh ? '抽帧率 (FPS)' : 'Frame Rate (FPS)'}>
+                <Section title={t('settings.videoProcessing')}>
+                  <Field label={t('settings.frameRate')}>
                     <div className="flex items-center gap-2">
                       <input
                         type="range"
@@ -354,11 +341,11 @@ export function SettingsModal(): React.JSX.Element | null {
                       </span>
                     </div>
                     <p className="mt-1 text-[10px] text-ink-500">
-                      {isZh ? '视频越快运动，FPS 越高。讲座类 0.5~1，运动类 2~5' : 'Higher FPS for fast motion. Lectures: 0.5~1, Sports: 2~5'}
+                      {t('settings.frameRateHint')}
                     </p>
                   </Field>
 
-                  <Field label={isZh ? '最大帧数' : 'Max Frames'}>
+                  <Field label={t('settings.maxFrames')}>
                     <Select
                       value={String(settings.frameSettings?.maxFrames ?? 30)}
                       options={[
@@ -374,11 +361,11 @@ export function SettingsModal(): React.JSX.Element | null {
                     />
                   </Field>
 
-                  <Field label={isZh ? '帧缩放' : 'Frame Scale'}>
+                  <Field label={t('settings.frameScale')}>
                     <Select
                       value={settings.frameSettings?.scale ?? ''}
                       options={[
-                        { value: '', label: isZh ? '原始分辨率' : 'Original' },
+                        { value: '', label: t('settings.frameScaleOriginal') },
                         { value: '512:-2', label: '512px' },
                         { value: '720:-2', label: '720px' },
                       ]}
@@ -388,7 +375,7 @@ export function SettingsModal(): React.JSX.Element | null {
                     />
                   </Field>
 
-                  <Field label={isZh ? '上下文大小 (num_ctx)' : 'Context Size (num_ctx)'}>
+                  <Field label={t('settings.contextSize')}>
                     <Select
                       value={String(settings.frameSettings?.numCtx ?? 16384)}
                       options={[
@@ -404,11 +391,11 @@ export function SettingsModal(): React.JSX.Element | null {
                       })}
                     />
                     <p className="mt-1 text-[10px] text-ink-500">
-                      {isZh ? 'Gemma4 支持 256K，但 16K 足够 30 秒视频。越大越慢。' : 'Gemma4 supports 256K, but 16K is enough for 30s segments. Larger = slower.'}
+                      {t('settings.contextSizeHint')}
                     </p>
                   </Field>
 
-                  <Field label={isZh ? '音频分离' : 'Audio Extraction'}>
+                  <Field label={t('settings.audioExtraction')}>
                     <label className="flex items-center gap-2 text-[12px]">
                       <input
                         type="checkbox"
@@ -417,7 +404,7 @@ export function SettingsModal(): React.JSX.Element | null {
                           audioExtractSettings: { ...settings.audioExtractSettings, enabled: e.target.checked }
                         })}
                       />
-                      {isZh ? '从视频中分离音频轨（供音频模型使用）' : 'Extract audio track from video (for audio models)'}
+                      {t('settings.audioExtractionHint')}
                     </label>
                   </Field>
                 </Section>
@@ -426,50 +413,49 @@ export function SettingsModal(): React.JSX.Element | null {
                   cookiesPath={settings.cookiesPath}
                   onPathChange={(p) => updateSettings({ cookiesPath: p })}
                   onAfterExport={pushEngineConfig}
-                  isZh={isZh}
                 />
 
                 {/* ── Network / Proxy ── */}
-                <Section title={isZh ? '网络与代理' : 'Network & Proxy'}>
-                  <Field label={isZh ? 'HTTP 代理' : 'HTTP Proxy'}>
+                <Section title={t('settings.networkProxy')}>
+                  <Field label={t('settings.httpProxy')}>
                     <input
                       value={settings.proxySettings?.httpProxy ?? ''}
                       onChange={(e) => updateSettings({
                         proxySettings: { ...settings.proxySettings, httpProxy: e.target.value }
                       })}
-                      placeholder={isZh ? '留空使用系统代理，例: http://127.0.0.1:7890' : 'Leave empty for system proxy, e.g. http://127.0.0.1:7890'}
+                      placeholder={t('settings.httpProxyPlaceholder')}
                       className="settings-input text-[12px]"
                       style={{ fontFamily: 'var(--font-mono)' }}
                     />
                   </Field>
 
-                  <Field label={isZh ? 'GitHub 下载镜像' : 'GitHub Download Mirror'}>
+                  <Field label={t('settings.githubMirror')}>
                     <input
                       value={settings.proxySettings?.githubMirror ?? ''}
                       onChange={(e) => updateSettings({
                         proxySettings: { ...settings.proxySettings, githubMirror: e.target.value }
                       })}
-                      placeholder={isZh ? '留空直连，例: https://mirror.ghproxy.com/' : 'Leave empty for direct, e.g. https://mirror.ghproxy.com/'}
+                      placeholder={t('settings.githubMirrorPlaceholder')}
                       className="settings-input text-[12px]"
                       style={{ fontFamily: 'var(--font-mono)' }}
                     />
                     <p className="mt-1 text-[10px] text-ink-500">
-                      {isZh ? 'Ollama 二进制下载加速。国内常用: mirror.ghproxy.com, ghfast.top' : 'Accelerate Ollama binary download.'}
+                      {t('settings.githubMirrorHint')}
                     </p>
                   </Field>
 
-                  <Field label={isZh ? 'Ollama 模型镜像' : 'Ollama Model Mirror'}>
+                  <Field label={t('settings.ollamaMirror')}>
                     <input
                       value={settings.proxySettings?.ollamaMirror ?? ''}
                       onChange={(e) => updateSettings({
                         proxySettings: { ...settings.proxySettings, ollamaMirror: e.target.value }
                       })}
-                      placeholder={isZh ? '留空用官方源，例: https://mirror.ollama.com' : 'Leave empty for official, e.g. https://mirror.ollama.com'}
+                      placeholder={t('settings.ollamaMirrorPlaceholder')}
                       className="settings-input text-[12px]"
                       style={{ fontFamily: 'var(--font-mono)' }}
                     />
                     <p className="mt-1 text-[10px] text-ink-500">
-                      {isZh ? '模型拉取加速。Ollama 官方有国内镜像 mirror.ollama.com' : 'Model pull acceleration.'}
+                      {t('settings.ollamaMirrorHint')}
                     </p>
                   </Field>
                 </Section>
@@ -562,13 +548,11 @@ function Section({
 function CookiesSection({
   cookiesPath,
   onPathChange,
-  onAfterExport,
-  isZh
+  onAfterExport
 }: {
   cookiesPath: string
   onPathChange: (p: string) => void
   onAfterExport?: () => Promise<boolean>
-  isZh: boolean
 }): React.JSX.Element {
   const { t } = useTranslation()
   const [exporting, setExporting] = React.useState(false)
@@ -583,9 +567,9 @@ function CookiesSection({
       if (onAfterExport) {
         await onAfterExport()
       }
-      setExportResult(isZh ? '导出成功' : 'Exported successfully')
+      setExportResult(t('settings.cookiesExportSuccess'))
     } else {
-      setExportResult(result.error || (isZh ? '导出失败' : 'Export failed'))
+      setExportResult(result.error || t('settings.cookiesExportFailed'))
     }
     setExporting(false)
   }
@@ -596,7 +580,7 @@ function CookiesSection({
         <input
           value={cookiesPath}
           onChange={(e) => onPathChange(e.target.value)}
-          placeholder={isZh ? 'Bilibili cookies 文件路径' : 'Bilibili cookies file path'}
+          placeholder={t('settings.cookiesPlaceholder')}
           className="settings-input text-[12px]"
           style={{ fontFamily: 'var(--font-mono)' }}
         />
@@ -608,9 +592,7 @@ function CookiesSection({
           disabled={exporting}
           onClick={() => void handleExport('chrome')}
         >
-          {exporting
-            ? (isZh ? '导出中...' : 'Exporting...')
-            : (isZh ? '从 Chrome 导出' : 'Export from Chrome')}
+          {exporting ? t('settings.cookiesExporting') : t('settings.cookiesFromChrome')}
         </button>
         <button
           type="button"
@@ -618,9 +600,7 @@ function CookiesSection({
           disabled={exporting}
           onClick={() => void handleExport('safari')}
         >
-          {exporting
-            ? (isZh ? '导出中...' : 'Exporting...')
-            : (isZh ? '从 Safari 导出' : 'Export from Safari')}
+          {exporting ? t('settings.cookiesExporting') : t('settings.cookiesFromSafari')}
         </button>
         <button
           type="button"
@@ -628,9 +608,7 @@ function CookiesSection({
           disabled={exporting}
           onClick={() => void handleExport('firefox')}
         >
-          {exporting
-            ? (isZh ? '导出中...' : 'Exporting...')
-            : (isZh ? '从 Firefox 导出' : 'Export from Firefox')}
+          {exporting ? t('settings.cookiesExporting') : t('settings.cookiesFromFirefox')}
         </button>
       </div>
       {exportResult && (
@@ -642,9 +620,7 @@ function CookiesSection({
         </p>
       )}
       <p className="text-[10px] text-ink-500">
-        {isZh
-          ? '需要在对应浏览器中登录 B 站。Cookies 仅保存在本地。'
-          : 'Must be logged into Bilibili in the browser. Cookies are stored locally only.'}
+        {t('settings.cookiesHint')}
       </p>
     </div>
   )

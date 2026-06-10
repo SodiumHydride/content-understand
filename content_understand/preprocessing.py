@@ -18,10 +18,10 @@ import os
 import shutil
 import subprocess
 import tempfile
-from contextlib import contextmanager
+from collections.abc import Generator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator
 
 from content_understand.capabilities import (
     ContentBundle,
@@ -118,13 +118,6 @@ class AudioChunk:
         e_m, e_s = divmod(int(self.end_seconds), 60)
         return f"{s_m:02d}:{s_s:02d}-{e_m:02d}:{e_s:02d}"
 
-    @property
-    def ffmpeg_vf(self) -> str:
-        """Build FFmpeg -vf filter string."""
-        parts = [f"fps={self.fps}"]
-        if self.scale:
-            parts.append(self.scale)
-        return ",".join(parts)
 
 
 @dataclass
@@ -251,13 +244,15 @@ class ContentPreprocessor:
             # Scene-aware frame extraction + audio transcription
             if fc.strategy == "scene_aware":
                 bundle.frames, bundle.frame_timestamps = self._extract_frames_scene_aware(
-                    bundle.video_path, fc,
+                    bundle.video_path,
+                    fc,
                 )
             else:
                 bundle.frames = self._extract_frames(bundle.video_path, capabilities, fc)
             # Extract audio and transcribe with Whisper
             bundle.audio_path, bundle.audio_chunks = self._extract_audio_chunks(
-                bundle.video_path, ac,
+                bundle.video_path,
+                ac,
             )
             if bundle.audio_path:
                 transcript = self._transcribe_audio(bundle.audio_path)
@@ -270,7 +265,8 @@ class ContentPreprocessor:
             # Extract frames only (with scene awareness if configured)
             if fc.strategy == "scene_aware":
                 bundle.frames, bundle.frame_timestamps = self._extract_frames_scene_aware(
-                    bundle.video_path, fc,
+                    bundle.video_path,
+                    fc,
                 )
             else:
                 bundle.frames = self._extract_frames(bundle.video_path, capabilities, fc)
@@ -317,23 +313,30 @@ class ContentPreprocessor:
         try:
             with _ffmpeg_safe_path(video_path) as safe_in:
                 cmd = [
-                    "ffmpeg", "-y",
-                    "-i", safe_in,
-                    "-vf", vf,
-                    "-frames:v", str(fc.max_frames),
-                    "-q:v", str(fc.quality),
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    safe_in,
+                    "-vf",
+                    vf,
+                    "-frames:v",
+                    str(fc.max_frames),
+                    "-q:v",
+                    str(fc.quality),
                     str(tmpdir / "frame_%06d.jpg"),
                 ]
                 result = subprocess.run(cmd, capture_output=True, timeout=300)
             if result.returncode != 0:
-                logger.warning("Frame extraction failed: %s",
-                               result.stderr.decode(errors="replace")[:300])
+                logger.warning(
+                    "Frame extraction failed: %s", result.stderr.decode(errors="replace")[:300]
+                )
                 shutil.rmtree(tmpdir, ignore_errors=True)
                 return []
 
             frames = sorted(tmpdir.glob("frame_*.jpg"))
-            logger.info("Extracted %d frames at %.1f fps from %s",
-                        len(frames), effective_fps, video_path)
+            logger.info(
+                "Extracted %d frames at %.1f fps from %s", len(frames), effective_fps, video_path
+            )
             return frames
 
         except subprocess.TimeoutExpired:
@@ -372,7 +375,9 @@ class ContentPreprocessor:
             scene_timestamps = self._detect_scene_changes(video_path, fc, tmpdir, duration)
 
             # Step 2: Uniform sampling to fill gaps
-            uniform_timestamps = self._uniform_sample(video_path, fc, tmpdir, duration, start_index=len(scene_timestamps))
+            uniform_timestamps = self._uniform_sample(
+                video_path, fc, tmpdir, duration, start_index=len(scene_timestamps)
+            )
 
             # Step 3: Merge, deduplicate, and cap
             all_timestamps = scene_timestamps + uniform_timestamps
@@ -389,8 +394,12 @@ class ContentPreprocessor:
                     ft.index = i
 
             frame_paths = [ft.path for ft in merged]
-            logger.info("Scene-aware extraction: %d frames from %s (%.0fs video)",
-                        len(frame_paths), video_path, duration or 0)
+            logger.info(
+                "Scene-aware extraction: %d frames from %s (%.0fs video)",
+                len(frame_paths),
+                video_path,
+                duration or 0,
+            )
             return frame_paths, merged
 
         except Exception as e:
@@ -399,7 +408,11 @@ class ContentPreprocessor:
             return [], []
 
     def _detect_scene_changes(
-        self, video_path: str, fc: FrameConfig, tmpdir: Path, duration: float | None,
+        self,
+        video_path: str,
+        fc: FrameConfig,
+        tmpdir: Path,
+        duration: float | None,
     ) -> list[FrameTimestamp]:
         """Use ffmpeg scene detection to find key frames."""
         scene_dir = tmpdir / "scene"
@@ -412,18 +425,27 @@ class ContentPreprocessor:
 
         with _ffmpeg_safe_path(video_path) as safe_in:
             cmd = [
-                "ffmpeg", "-y",
-                "-i", safe_in,
-                "-vf", vf,
-                "-vsync", "vfr",
-                "-frames:v", str(fc.max_frames // 2),  # Reserve half for scene frames
-                "-q:v", str(fc.quality),
+                "ffmpeg",
+                "-y",
+                "-i",
+                safe_in,
+                "-vf",
+                vf,
+                "-vsync",
+                "vfr",
+                "-frames:v",
+                str(fc.max_frames // 2),  # Reserve half for scene frames
+                "-q:v",
+                str(fc.quality),
                 str(scene_dir / "scene_%06d.jpg"),
             ]
             result = subprocess.run(cmd, capture_output=True, timeout=120)
         if result.returncode != 0:
-            logger.debug("Scene detection returned %d: %s",
-                         result.returncode, result.stderr.decode(errors="replace")[:200])
+            logger.debug(
+                "Scene detection returned %d: %s",
+                result.returncode,
+                result.stderr.decode(errors="replace")[:200],
+            )
             return []
 
         # Get timestamps from ffmpeg using showinfo filter
@@ -431,8 +453,12 @@ class ContentPreprocessor:
         return timestamps
 
     def _uniform_sample(
-        self, video_path: str, fc: FrameConfig, tmpdir: Path,
-        duration: float | None, start_index: int = 0,
+        self,
+        video_path: str,
+        fc: FrameConfig,
+        tmpdir: Path,
+        duration: float | None,
+        start_index: int = 0,
     ) -> list[FrameTimestamp]:
         """Uniform frame sampling to ensure full video coverage."""
         uniform_dir = tmpdir / "uniform"
@@ -451,11 +477,16 @@ class ContentPreprocessor:
 
         with _ffmpeg_safe_path(video_path) as safe_in:
             cmd = [
-                "ffmpeg", "-y",
-                "-i", safe_in,
-                "-vf", vf,
-                "-frames:v", str(remaining_frames),
-                "-q:v", str(fc.quality),
+                "ffmpeg",
+                "-y",
+                "-i",
+                safe_in,
+                "-vf",
+                vf,
+                "-frames:v",
+                str(remaining_frames),
+                "-q:v",
+                str(fc.quality),
                 str(uniform_dir / "uni_%06d.jpg"),
             ]
             result = subprocess.run(cmd, capture_output=True, timeout=300)
@@ -466,32 +497,70 @@ class ContentPreprocessor:
         return timestamps
 
     def _get_frame_timestamps(
-        self, video_path: str, frame_dir: Path, start_index: int = 0,
+        self,
+        video_path: str,
+        frame_dir: Path,
+        start_index: int = 0,
     ) -> list[FrameTimestamp]:
-        """Get timestamps for extracted frames using ffprobe showinfo."""
-        # Simple approach: use ffprobe to get frame timestamps
-        # For extracted frames, calculate based on fps and index
+        """Get timestamps for extracted frames using ffprobe showinfo for accuracy."""
         frames = sorted(frame_dir.glob("*.jpg"))
         if not frames:
             return []
 
-        duration = self._get_duration(video_path) or 0
+        # Try ffprobe to get real frame timestamps from the source video
+        real_timestamps = self._get_real_frame_timestamps(video_path)
+
         result = []
         for i, frame_path in enumerate(frames):
-            # Estimate timestamp based on frame position in sequence
-            if len(frames) > 1 and duration > 0:
-                ts = (i / (len(frames) - 1)) * duration
+            if real_timestamps and i < len(real_timestamps):
+                ts = real_timestamps[i]
             else:
-                ts = 0.0
-            result.append(FrameTimestamp(
-                path=frame_path,
-                timestamp_seconds=ts,
-                index=start_index + i,
-            ))
+                # Fallback: linear interpolation
+                duration = self._get_duration(video_path) or 0
+                ts = i / (len(frames) - 1) * duration if len(frames) > 1 and duration > 0 else 0.0
+            result.append(
+                FrameTimestamp(
+                    path=frame_path,
+                    timestamp_seconds=ts,
+                    index=start_index + i,
+                )
+            )
         return result
 
+    def _get_real_frame_timestamps(self, video_path: str) -> list[float] | None:
+        """Use ffprobe to extract PTS timestamps of keyframes from the source video."""
+        import json as _json
+
+        try:
+            cmd = [
+                "ffprobe",
+                "-v", "quiet",
+                "-select_streams", "v:0",
+                "-show_entries", "frame=pts_time",
+                "-of", "json",
+                video_path,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode != 0:
+                return None
+            data = _json.loads(result.stdout)
+            frames = data.get("frames", [])
+            if not frames:
+                return None
+            timestamps = []
+            for f in frames:
+                pts = f.get("pts_time")
+                if pts is not None:
+                    with suppress(ValueError, TypeError):
+                        timestamps.append(float(pts))
+            return timestamps if timestamps else None
+        except Exception:
+            return None
+
     def _deduplicate_nearby(
-        self, timestamps: list[FrameTimestamp], min_gap_seconds: float = 2.0,
+        self,
+        timestamps: list[FrameTimestamp],
+        min_gap_seconds: float = 2.0,
     ) -> list[FrameTimestamp]:
         """Remove frames that are too close together, keeping scene-change frames priority."""
         if not timestamps:
@@ -529,19 +598,26 @@ class ContentPreprocessor:
         try:
             with _ffmpeg_safe_path(video_path) as safe_in:
                 cmd = [
-                    "ffmpeg", "-y",
-                    "-i", safe_in,
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    safe_in,
                     "-vn",
-                    "-acodec", "pcm_s16le" if ac.format == "wav" else "aac",
-                    "-ar", str(ac.sample_rate),
-                    "-ac", str(ac.channels),
-                    "-b:a", ac.bitrate,
+                    "-acodec",
+                    "pcm_s16le" if ac.format == "wav" else "aac",
+                    "-ar",
+                    str(ac.sample_rate),
+                    "-ac",
+                    str(ac.channels),
+                    "-b:a",
+                    ac.bitrate,
                     full_audio_path,
                 ]
                 result = subprocess.run(cmd, capture_output=True, timeout=300)
             if result.returncode != 0:
-                logger.warning("Audio extraction failed: %s",
-                               result.stderr.decode(errors="replace")[:200])
+                logger.warning(
+                    "Audio extraction failed: %s", result.stderr.decode(errors="replace")[:200]
+                )
                 return None, []
         except Exception as e:
             logger.error("Audio extraction error: %s", e)
@@ -556,30 +632,40 @@ class ContentPreprocessor:
             if start >= duration:
                 break
 
-            chunk_path = os.path.join(tmpdir, f"chunk_{i:03d}_{int(start)}s-{int(end)}s.{ac.format}")
+            chunk_path = os.path.join(
+                tmpdir, f"chunk_{i:03d}_{int(start)}s-{int(end)}s.{ac.format}"
+            )
             chunk_cmd = [
-                "ffmpeg", "-y",
-                "-i", full_audio_path,
-                "-ss", str(start),
-                "-t", str(end - start),
-                "-c", "copy",
+                "ffmpeg",
+                "-y",
+                "-i",
+                full_audio_path,
+                "-ss",
+                str(start),
+                "-t",
+                str(end - start),
+                "-c",
+                "copy",
                 chunk_path,
             ]
 
             try:
                 chunk_result = subprocess.run(chunk_cmd, capture_output=True, timeout=60)
                 if chunk_result.returncode == 0 and os.path.exists(chunk_path):
-                    chunks.append(AudioChunk(
-                        path=chunk_path,
-                        start_seconds=start,
-                        end_seconds=end,
-                        index=i,
-                    ))
+                    chunks.append(
+                        AudioChunk(
+                            path=chunk_path,
+                            start_seconds=start,
+                            end_seconds=end,
+                            index=i,
+                        )
+                    )
             except Exception as e:
                 logger.debug("Audio chunk %d failed: %s", i, e)
 
-        logger.info("Audio: extracted %d chunks (%.0fs total) from %s",
-                     len(chunks), duration, video_path)
+        logger.info(
+            "Audio: extracted %d chunks (%.0fs total) from %s", len(chunks), duration, video_path
+        )
         return full_audio_path, chunks
 
     def _transcribe_audio(self, audio_path: str) -> str | None:
@@ -589,10 +675,12 @@ class ContentPreprocessor:
         """
         try:
             import subprocess
+
             # Check if whisper CLI is available
             result = subprocess.run(
                 ["whisper", "--version"],
-                capture_output=True, timeout=5,
+                capture_output=True,
+                timeout=5,
             )
             if result.returncode != 0:
                 logger.debug("Whisper not available, skipping transcription")
@@ -603,22 +691,32 @@ class ContentPreprocessor:
 
         try:
             import tempfile
+
             output_dir = tempfile.mkdtemp(prefix="cu_whisper_")
             cmd = [
-                "whisper", audio_path,
-                "--model", "base",
-                "--output_format", "txt",
-                "--output_dir", output_dir,
-                "--language", "zh",
+                "whisper",
+                audio_path,
+                "--model",
+                "base",
+                "--output_format",
+                "txt",
+                "--output_dir",
+                output_dir,
+                "--language",
+                "zh",
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             if result.returncode != 0:
                 # Try without language hint
                 cmd_no_lang = [
-                    "whisper", audio_path,
-                    "--model", "base",
-                    "--output_format", "txt",
-                    "--output_dir", output_dir,
+                    "whisper",
+                    audio_path,
+                    "--model",
+                    "base",
+                    "--output_format",
+                    "txt",
+                    "--output_dir",
+                    output_dir,
                 ]
                 result = subprocess.run(cmd_no_lang, capture_output=True, text=True, timeout=300)
 
@@ -628,9 +726,10 @@ class ContentPreprocessor:
 
             # Read transcript
             import glob as glob_mod
+
             txt_files = glob_mod.glob(os.path.join(output_dir, "*.txt"))
             if txt_files:
-                with open(txt_files[0], "r", encoding="utf-8") as f:
+                with open(txt_files[0], encoding="utf-8") as f:
                     transcript = f.read().strip()
                 # Cleanup
                 shutil.rmtree(output_dir, ignore_errors=True)
@@ -665,13 +764,19 @@ class ContentPreprocessor:
         try:
             with _ffmpeg_safe_path(video_path) as safe_in:
                 cmd = [
-                    "ffmpeg", "-y",
-                    "-i", safe_in,
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    safe_in,
                     "-vn",  # No video
-                    "-acodec", "pcm_s16le" if ac.format == "wav" else "aac",
-                    "-ar", str(ac.sample_rate),
-                    "-ac", str(ac.channels),
-                    "-b:a", ac.bitrate,
+                    "-acodec",
+                    "pcm_s16le" if ac.format == "wav" else "aac",
+                    "-ar",
+                    str(ac.sample_rate),
+                    "-ac",
+                    str(ac.channels),
+                    "-b:a",
+                    ac.bitrate,
                     output_path,
                 ]
                 result = subprocess.run(cmd, capture_output=True, timeout=300)
@@ -679,8 +784,9 @@ class ContentPreprocessor:
                 size = os.path.getsize(output_path)
                 logger.info("Extracted audio: %s (%d bytes)", output_path, size)
                 return output_path
-            logger.warning("Audio extraction failed: %s",
-                           result.stderr.decode(errors="replace")[:200])
+            logger.warning(
+                "Audio extraction failed: %s", result.stderr.decode(errors="replace")[:200]
+            )
             shutil.rmtree(tmpdir, ignore_errors=True)
             return None
 
@@ -698,9 +804,13 @@ class ContentPreprocessor:
         try:
             with _ffmpeg_safe_path(path) as safe_in:
                 cmd = [
-                    "ffprobe", "-v", "quiet",
-                    "-show_entries", "format=duration",
-                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    "ffprobe",
+                    "-v",
+                    "quiet",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
                     safe_in,
                 ]
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -718,9 +828,12 @@ class ContentPreprocessor:
         if not mime:
             ext = Path(path).suffix.lower()
             _EXTRA = {
-                ".webp": "image/webp", ".avif": "image/avif",
-                ".heic": "image/heic", ".opus": "audio/opus",
-                ".m4b": "audio/mp4", ".mkv": "video/x-matroska",
+                ".webp": "image/webp",
+                ".avif": "image/avif",
+                ".heic": "image/heic",
+                ".opus": "audio/opus",
+                ".m4b": "audio/mp4",
+                ".mkv": "video/x-matroska",
                 ".webm": "video/webm",
             }
             mime = _EXTRA.get(ext)
@@ -748,7 +861,8 @@ class ContentPreprocessor:
             if size > ContentPreprocessor._MAX_BASE64_SIZE:
                 logger.warning(
                     "File too large for base64 encoding: %s (%d bytes > 500 MB limit)",
-                    path, size,
+                    path,
+                    size,
                 )
                 return None
             with open(path, "rb") as f:

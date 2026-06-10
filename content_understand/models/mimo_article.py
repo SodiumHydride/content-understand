@@ -15,6 +15,7 @@ def _mimo_headers(key: str) -> dict[str, str]:
     """MiMo uses 'api-key' header instead of 'Authorization: Bearer'."""
     return {"api-key": key, "Content-Type": "application/json"}
 
+
 _DEFAULT_ARTICLE_PROMPT: dict[str, str] = {
     "zh": """请详细分析以下文章内容，输出结构化摘要。
 
@@ -96,7 +97,11 @@ class MimoArticleModel(ArticleModel):
 
     def _post(self, body: dict, timeout: int, label: str) -> str:
         return rotate_request(
-            self.api_base, body, self.rotator, timeout, f"article-mimo:{label}",
+            self.api_base,
+            body,
+            self.rotator,
+            timeout,
+            f"article-mimo:{label}",
             headers_factory=_mimo_headers,
         )
 

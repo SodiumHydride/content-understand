@@ -25,6 +25,8 @@ export default [
         NodeJS: "readonly",
         setTimeout: "readonly",
         clearTimeout: "readonly",
+        fetch: "readonly",
+        AbortSignal: "readonly",
       },
     },
     plugins: {
@@ -81,6 +83,13 @@ export default [
         Headers: "readonly",
         URLSearchParams: "readonly",
         crypto: "readonly",
+        localStorage: "readonly",
+        File: "readonly",
+        AbortController: "readonly",
+        Notification: "readonly",
+        btoa: "readonly",
+        structuredClone: "readonly",
+        Image: "readonly",
       },
     },
     plugins: {

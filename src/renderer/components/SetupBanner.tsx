@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query'
 export function SetupBanner(): React.JSX.Element | null {
   const { t, i18n } = useTranslation()
   const isZh = i18n.language.startsWith('zh')
+  const lang = i18n.language
   const sidecarOnline = useAppStore((s) => s.sidecarOnline)
   const settings = useAppStore((s) => s.settings)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
@@ -23,7 +24,7 @@ export function SetupBanner(): React.JSX.Element | null {
 
   const line = useMemo(() => {
     if (!sidecarOnline) return ''
-    const opProgress = deriveOperationProgress(catalog ?? null, catalog?.presets ?? [], isZh)
+    const opProgress = deriveOperationProgress(catalog ?? null, catalog?.presets ?? [], t)
     if (opProgress) {
       const pct =
         typeof opProgress.percent === 'number' ? ` ${opProgress.percent}%` : ''

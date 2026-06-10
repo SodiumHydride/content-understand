@@ -101,9 +101,7 @@ class ContentConfig(BaseModel):
         if name in self.backends:
             return self.backends[name]
         known = ", ".join(sorted(self.backends)) or "(none)"
-        raise KeyError(
-            f"Backend '{name}' is not configured. Available backends: {known}"
-        )
+        raise KeyError(f"Backend '{name}' is not configured. Available backends: {known}")
 
     _KNOWN_CONTENT_TYPES = frozenset({"video", "image", "audio", "article"})
 

@@ -63,6 +63,9 @@ class LocalFileResolver(Resolver):
             path = _file_url_to_path(input)
         else:
             path = input
+            parts = os.path.normpath(path).replace("\\", "/").split("/")
+            if ".." in parts:
+                raise ValueError(f"Path traversal detected: {input}")
         path = os.path.abspath(path)
 
         if not os.path.isfile(path):

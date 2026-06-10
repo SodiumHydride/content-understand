@@ -46,7 +46,10 @@ export function panCamera(camera: MapCamera, dx: number, dy: number): MapCamera 
 }
 
 export function cameraTransform(camera: MapCamera): string {
-  return `translate(${camera.x}px, ${camera.y}px) scale(${camera.z})`
+  const x = Number.isFinite(camera.x) ? camera.x : 0
+  const y = Number.isFinite(camera.y) ? camera.y : 0
+  const z = Number.isFinite(camera.z) && camera.z > 0 ? camera.z : 1
+  return `translate(${x}px, ${y}px) scale(${z})`
 }
 
 export type MapContentBounds = {

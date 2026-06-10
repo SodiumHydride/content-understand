@@ -3,7 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware'
 import type { OllamaCatalog } from '../lib/sidecar'
 import { mergeTaskMetrics, presetLabel, TASK_HOLD_MS } from '../lib/ollamaProgress'
 
-export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled'
+export type OllamaTaskStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled'
 export type TaskType = 'pull' | 'delete' | 'load' | 'unload' | 'download'
 
 export interface Task {
@@ -16,22 +16,34 @@ export interface Task {
   completedBytes: number
   speedBps: number
   etaSec: number
-  status: TaskStatus
+  status: OllamaTaskStatus
   error?: string
   startedAt: number
   completedAt?: number
+  /** SSE stream stage label (e.g. "pulling manifest", "downloading …") */
+  stage?: string
 }
 
 interface TaskStore {
   tasks: Record<string, Task>
+  /** presetId currently being driven by SSE (so catalog sync can skip it) */
+  ssePullPresetId: string | null
+  setSsePullPresetId: (presetId: string | null) => void
   addTask: (
     task: Omit<Task, 'id' | 'status' | 'startedAt' | 'totalBytes' | 'completedBytes' | 'speedBps' | 'etaSec'> & {
-      status?: TaskStatus
+      status?: OllamaTaskStatus
       id?: string
     }
   ) => string
   updateProgress: (id: string, progress: number, totalBytes?: number, completedBytes?: number, speedBps?: number) => void
-  syncOllamaCatalog: (catalog: OllamaCatalog, isZh: boolean) => void
+  /** Apply a live SSE progress event to the pull task. */
+  updatePullFromSSE: (
+    taskId: string,
+    data: { stage: string; percent: number; total_bytes: number; completed_bytes: number; speed_bps: number; elapsed_sec: number }
+  ) => void
+  /** Mark a pull task as failed from SSE and clear ssePullPresetId. */
+  failPullFromSSE: (taskId: string, error: string) => void
+  syncOllamaCatalog: (catalog: OllamaCatalog, t: (key: string, opts?: Record<string, unknown>) => string, lang?: string) => void
   completeTask: (id: string) => void
   failTask: (id: string, error: string) => void
   dismissTask: (id: string) => void
@@ -42,6 +54,9 @@ interface TaskStore {
 export const useTaskStore = create<TaskStore>()(
   subscribeWithSelector((set, get) => ({
     tasks: {},
+    ssePullPresetId: null,
+
+    setSsePullPresetId: (presetId) => set({ ssePullPresetId: presetId }),
 
     addTask: (task) => {
       const { id: requestedId, ...rest } = task
@@ -86,7 +101,43 @@ export const useTaskStore = create<TaskStore>()(
         }
       }),
 
-    syncOllamaCatalog: (catalog, isZh) =>
+    updatePullFromSSE: (taskId, data) =>
+      set((s) => {
+        const existing = s.tasks[taskId]
+        if (!existing) return s
+        const merged = mergeTaskMetrics(existing, {
+          progress: data.percent,
+          totalBytes: data.total_bytes,
+          completedBytes: data.completed_bytes,
+          speedBps: data.speed_bps
+        })
+        return {
+          tasks: {
+            ...s.tasks,
+            [taskId]: {
+              ...existing,
+              status: 'running',
+              stage: data.stage,
+              ...merged
+            }
+          }
+        }
+      }),
+
+    failPullFromSSE: (taskId, error) =>
+      set((s) => {
+        const existing = s.tasks[taskId]
+        if (!existing) return s
+        return {
+          ssePullPresetId: null,
+          tasks: {
+            ...s.tasks,
+            [taskId]: { ...existing, status: 'error', error, completedAt: Date.now() }
+          }
+        }
+      }),
+
+    syncOllamaCatalog: (catalog, t, lang) =>
       set((s) => {
         const op = catalog.operation
         const presets = catalog.presets ?? []
@@ -141,7 +192,7 @@ export const useTaskStore = create<TaskStore>()(
           upsert('ollama-download-binary', {
             type: 'download',
             modelName: 'ollama-binary',
-            label: isZh ? '正在下载应用内 Ollama' : 'Downloading app Ollama',
+            label: t('ollama.downloadingAppOllamaProgress'),
             status: 'running',
             progress: typeof p?.percent === 'number' ? p.percent : -1,
             totalBytes: p?.total_bytes ?? 0,
@@ -152,7 +203,7 @@ export const useTaskStore = create<TaskStore>()(
           upsert('ollama-download-binary', {
             type: 'download',
             modelName: 'ollama-binary',
-            label: isZh ? '应用内 Ollama 已就绪' : 'App Ollama ready',
+            label: t('ollama.appOllamaReady'),
             status: 'done',
             progress: 100,
             totalBytes: next['ollama-download-binary'].totalBytes,
@@ -163,26 +214,30 @@ export const useTaskStore = create<TaskStore>()(
         }
 
         const pullingId = op?.pulling_preset_id
+        const ssePresetId = get().ssePullPresetId
         if (pullingId && (op?.state === 'working' || op?.setup_running)) {
-          const preset = presets.find((row) => (row.preset_id ?? row.id) === pullingId)
-          const modelName = preset?.ollama_model ?? pullingId
-          const p = op?.progress
-          upsert(`ollama-pull-${pullingId}`, {
-            type: 'pull',
-            modelName,
-            label: isZh ? `正在拉取 ${modelName}` : `Pulling ${modelName}`,
-            status: 'running',
-            progress: typeof p?.percent === 'number' ? p.percent : -1,
-            totalBytes: p?.total_bytes ?? 0,
-            completedBytes: p?.completed_bytes ?? 0,
-            speedBps: p?.speed_bps ?? 0
-          })
+          // Skip catalog-driven progress upsert when SSE is driving this exact pull
+          if (pullingId !== ssePresetId) {
+            const preset = presets.find((row) => (row.preset_id ?? row.id) === pullingId)
+            const modelName = preset?.ollama_model ?? pullingId
+            const p = op?.progress
+            upsert(`ollama-pull-${pullingId}`, {
+              type: 'pull',
+              modelName,
+              label: t('ollama.pulling', { model: modelName }),
+              status: 'running',
+              progress: typeof p?.percent === 'number' ? p.percent : -1,
+              totalBytes: p?.total_bytes ?? 0,
+              completedBytes: p?.completed_bytes ?? 0,
+              speedBps: p?.speed_bps ?? 0
+            })
+          }
         } else if (op?.setup_running || (op?.state === 'working' && !pullingId)) {
           const p = op?.progress
           upsert('ollama-setup', {
             type: 'pull',
             modelName: 'runtime-setup',
-            label: isZh ? '正在配置本地运行时' : 'Setting up local runtime',
+            label: t('ollama.settingUpRuntime'),
             status: 'running',
             progress: typeof p?.percent === 'number' ? p.percent : -1,
             totalBytes: p?.total_bytes ?? 0,
@@ -206,9 +261,7 @@ export const useTaskStore = create<TaskStore>()(
             upsert(taskId, {
               type: 'pull',
               modelName: preset.ollama_model,
-              label: isZh
-                ? `已安装 ${presetLabel(presets, pid, isZh)}`
-                : `Installed ${presetLabel(presets, pid, isZh)}`,
+              label: t('ollama.pullComplete', { name: presetLabel(presets, pid, lang) }),
               status: 'done',
               progress: 100,
               totalBytes: next[taskId].totalBytes,
@@ -226,7 +279,7 @@ export const useTaskStore = create<TaskStore>()(
               upsert(key, {
                 ...row,
                 status: 'error',
-                error: op.message || (isZh ? '操作失败' : 'Operation failed'),
+                error: op.message || t('ollama.operationFailed'),
                 completedAt: Date.now()
               })
             }

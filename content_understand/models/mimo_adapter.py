@@ -45,6 +45,7 @@ class MimoAdapter(ContentModel):
     def video_model(self):
         if self._video_model is None:
             from content_understand.models.mimo import MimoModel
+
             self._video_model = MimoModel(self.config)
         return self._video_model
 
@@ -52,6 +53,7 @@ class MimoAdapter(ContentModel):
     def audio_model(self):
         if self._audio_model is None:
             from content_understand.models.mimo_audio import MimoAudioModel
+
             self._audio_model = MimoAudioModel(self.config)
         return self._audio_model
 
@@ -82,7 +84,9 @@ class MimoAdapter(ContentModel):
         json_schema: dict | None = None,
     ) -> str | dict:
         if bundle.content_type == "video":
-            return self._understand_video(bundle, prompt, timeout, language, frame_config, output_format, json_schema)
+            return self._understand_video(
+                bundle, prompt, timeout, language, frame_config, output_format, json_schema
+            )
         elif bundle.content_type == "audio":
             return self._understand_audio(bundle, prompt, timeout, language)
         elif bundle.content_type == "image":
@@ -135,6 +139,7 @@ class MimoAdapter(ContentModel):
         elif bundle.video_path:
             # Need to encode video to base64
             from content_understand.preprocessing import ContentPreprocessor
+
             b64 = ContentPreprocessor._encode_base64(bundle.video_path)
             if b64:
                 video_content = {
@@ -156,10 +161,12 @@ class MimoAdapter(ContentModel):
             from pathlib import Path
 
             audio_data = b64mod.b64encode(Path(bundle.audio_path).read_bytes()).decode()
-            content.append({
-                "type": "input_audio",
-                "input_audio": {"data": audio_data},
-            })
+            content.append(
+                {
+                    "type": "input_audio",
+                    "input_audio": {"data": audio_data},
+                }
+            )
 
         # Add text prompt
         content.append({"type": "text", "text": prompt or self._default_prompt(language)})
@@ -176,13 +183,18 @@ class MimoAdapter(ContentModel):
             body["temperature"] = 0.1
 
         result = rotate_request(
-            api_base, body, rotator, timeout, "mimo:video+audio",
+            api_base,
+            body,
+            rotator,
+            timeout,
+            "mimo:video+audio",
             headers_factory=_mimo_headers,
         )
 
         # Parse JSON if structured output was requested
         if output_format == "json":
             import json
+
             try:
                 return json.loads(result)
             except json.JSONDecodeError:
@@ -212,6 +224,7 @@ class MimoAdapter(ContentModel):
         language: str,
     ) -> str:
         from content_understand.models.mimo_image import MimoImageModel
+
         img_model = MimoImageModel(self.config)
 
         if bundle.images:

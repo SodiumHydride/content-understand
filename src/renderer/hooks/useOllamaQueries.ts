@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   fetchOllamaCatalog,
@@ -9,6 +10,7 @@ import {
   deleteOllamaModel,
   startOllama,
   stopOllama,
+  getCachedSidecarBase,
   type OllamaCatalog,
   type OllamaStatus,
   type LogEntry,
@@ -17,14 +19,64 @@ import {
 import { notify } from '../lib/notify'
 import { useTaskStore } from '../stores/taskStore'
 import { ollamaCatalogPollMs, waitForOllamaCatalog } from '../lib/ollamaProgress'
+import { useOllamaPullSSE } from './useOllamaPullSSE'
+
+// ─── SSE Bridge: connects to pull stream when ssePullPresetId is set ───
+
+/**
+ * Reads ssePullPresetId from the task store. When non-null, opens an SSE
+ * connection to the sidecar pull stream and drives task progress in real time.
+ * On SSE complete → marks task done, clears ssePullPresetId, invalidates catalog.
+ * On SSE failed → marks task error, clears ssePullPresetId, falls back to catalog polling.
+ */
+export function useOllamaPullSSEBridge(): void {
+  const presetId = useTaskStore((s) => s.ssePullPresetId)
+  const setSsePullPresetId = useTaskStore((s) => s.setSsePullPresetId)
+  const updatePullFromSSE = useTaskStore((s) => s.updatePullFromSSE)
+  const failPullFromSSE = useTaskStore((s) => s.failPullFromSSE)
+  const completeTask = useTaskStore((s) => s.completeTask)
+  const queryClient = useQueryClient()
+  const { t } = useTranslation()
+
+  // Resolve the task id for the current preset
+  const taskId = presetId ? `ollama-pull-${presetId}` : null
+
+  useOllamaPullSSE({
+    presetId,
+    baseUrl: getCachedSidecarBase(),
+    onProgress: (data) => {
+      if (taskId) updatePullFromSSE(taskId, data)
+    },
+    onComplete: () => {
+      if (taskId) {
+        completeTask(taskId)
+        setSsePullPresetId(null)
+        void queryClient.invalidateQueries({ queryKey: ['ollama'] })
+      }
+    },
+    onFailed: (data) => {
+      if (taskId) {
+        failPullFromSSE(taskId, data.error || t('ollama.pullFailed'))
+        setSsePullPresetId(null)
+        // Fall back to catalog polling which will pick up the final state
+        void queryClient.invalidateQueries({ queryKey: ['ollama'] })
+      }
+    }
+  })
+}
 
 // ─── Catalog (polling) ───────────────────────────────────────────
 
 export function useOllamaCatalog() {
+  const ssePullPresetId = useTaskStore((s) => s.ssePullPresetId)
   return useQuery<OllamaCatalog | null>({
     queryKey: ['ollama', 'catalog'],
     queryFn: fetchOllamaCatalog,
-    refetchInterval: (query) => ollamaCatalogPollMs(query.state.data ?? null)
+    refetchInterval: (query) => {
+      // When SSE is driving a pull, slow down catalog polling to 5 s (safety net)
+      if (ssePullPresetId) return 5_000
+      return ollamaCatalogPollMs(query.state.data ?? null)
+    }
   })
 }
 
@@ -45,7 +97,7 @@ export function useRuntimeStatus() {
 // ─── Logs (polling) ──────────────────────────────────────────────
 
 export function useLogs(opts?: { limit?: number; level?: string; jobId?: string }) {
-  return useQuery<LogEntry[]>({
+  return useQuery<LogEntry[] | null>({
     queryKey: ['logs', opts],
     queryFn: () => fetchLogs(opts),
     refetchInterval: 5_000,
@@ -56,7 +108,7 @@ export function useLogs(opts?: { limit?: number; level?: string; jobId?: string 
 // ─── All Installed Models ────────────────────────────────────────
 
 export function useAllInstalledModels() {
-  return useQuery<InstalledModel[]>({
+  return useQuery<InstalledModel[] | null>({
     queryKey: ['ollama', 'installed-all'],
     queryFn: fetchAllInstalledModels,
     staleTime: 30_000
@@ -65,35 +117,37 @@ export function useAllInstalledModels() {
 
 // ─── Pull Model Mutation ─────────────────────────────────────────
 
-type PullModelVars = { presetId: string; modelName: string; isZh: boolean }
+type PullModelVars = { presetId: string; modelName: string }
 
 export function usePullModel() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const addTask = useTaskStore((s) => s.addTask)
   const completeTask = useTaskStore((s) => s.completeTask)
   const failTask = useTaskStore((s) => s.failTask)
+  const setSsePullPresetId = useTaskStore((s) => s.setSsePullPresetId)
 
   // Shared across onMutate + mutationFn (mutations run sequentially)
   const activeTaskIdRef = useRef<string | null>(null)
 
   return useMutation({
-    onMutate: ({ presetId, modelName, isZh }: PullModelVars) => {
+    onMutate: ({ presetId, modelName }: PullModelVars) => {
       activeTaskIdRef.current = addTask({
         type: 'pull',
         modelName,
-        label: isZh ? `正在拉取 ${modelName}` : `Pulling ${modelName}`,
+        label: t('ollama.pulling', { model: modelName }),
         progress: -1,
         status: 'running'
       })
       void queryClient.invalidateQueries({ queryKey: ['ollama', 'catalog'] })
     },
-    mutationFn: async ({ presetId, isZh }: PullModelVars) => {
+    mutationFn: async ({ presetId }: PullModelVars) => {
       const taskId = activeTaskIdRef.current!
 
       const result = await pullOllamaPreset(presetId)
       if (!result.ok) {
-        failTask(taskId, result.error || (isZh ? '拉取失败' : 'Pull failed'))
-        throw new Error(result.error || (isZh ? '拉取失败' : 'Pull failed'))
+        failTask(taskId, result.error || t('ollama.pullFailed'))
+        throw new Error(result.error || t('ollama.pullFailed'))
       }
 
       if (result.status === 'already_installed') {
@@ -102,12 +156,16 @@ export function usePullModel() {
       }
 
       if (result.status === 'in_progress' && result.preset_id && result.preset_id !== presetId) {
-        const msg = isZh
-          ? '已有其他模型正在拉取，请等待完成后再试'
-          : 'Another model pull is already in progress'
+        const msg = t('ollama.anotherPullInProgress')
         failTask(taskId, msg)
         throw new Error(msg)
       }
+
+      // Hand off to SSE for real-time progress.
+      // The SSE bridge (useOllamaPullSSEBridge) will pick up the presetId,
+      // connect to the stream, and drive task progress / completion / failure.
+      // Catalog polling continues at a reduced rate as a safety net.
+      setSsePullPresetId(presetId)
 
       await waitForOllamaCatalog(
         (catalog) =>
@@ -115,25 +173,31 @@ export function usePullModel() {
             (p) => (p.preset_id ?? p.id) === presetId && p.installed
           ) === true,
         {
-          pollMs: 500,
+          pollMs: 5000,
           failIf: (catalog) =>
             catalog.operation?.state === 'error'
-              ? catalog.operation.message || (isZh ? '拉取失败' : 'Pull failed')
+              ? catalog.operation.message || t('ollama.pullFailed')
               : null
         }
       )
 
-      completeTask(taskId)
+      // SSE may have already completed the task; only mark done if still running.
+      const task = useTaskStore.getState().tasks[taskId]
+      if (task?.status === 'running') {
+        completeTask(taskId)
+      }
       return result
     },
     onSuccess: (_data, vars) => {
       activeTaskIdRef.current = null
-      notify(vars.isZh ? '模型已就绪' : 'Model ready', { type: 'success' })
+      setSsePullPresetId(null)
+      notify(t('ollama.modelReady'), { type: 'success' })
       void queryClient.invalidateQueries({ queryKey: ['ollama'] })
     },
     onError: (err: Error, vars) => {
       activeTaskIdRef.current = null
-      notify(vars.isZh ? '拉取失败' : 'Pull failed', { type: 'error', description: err.message })
+      setSsePullPresetId(null)
+      notify(t('ollama.pullFailed'), { type: 'error', description: err.message })
     }
   })
 }

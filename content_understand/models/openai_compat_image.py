@@ -32,7 +32,11 @@ class OpenAICompatImageModel(ImageModel):
     def _call_api(self, body: dict, timeout: int) -> str:
         url = f"{self.api_base}/chat/completions"
         return rotate_request(
-            url, body, self.rotator, timeout, "openai-compat:image",
+            url,
+            body,
+            self.rotator,
+            timeout,
+            "openai-compat:image",
         )
 
     def understand_image(
@@ -52,16 +56,22 @@ class OpenAICompatImageModel(ImageModel):
             data = Path(image_path).read_bytes()
             b64 = base64.b64encode(data).decode()
             ext = Path(image_path).suffix.lower().lstrip(".")
-            mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "gif": "gif", "webp": "webp"}.get(ext, "jpeg")
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/{mime};base64,{b64}"},
-            })
+            mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "gif": "gif", "webp": "webp"}.get(
+                ext, "jpeg"
+            )
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/{mime};base64,{b64}"},
+                }
+            )
         else:
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": image_url},
-            })
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_url},
+                }
+            )
 
         if not prompt:
             _defaults = {

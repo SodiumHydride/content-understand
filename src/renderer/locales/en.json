@@ -114,10 +114,13 @@
       "thinking": "Text: click to type · Pen/highlighter: drag · Image: paste or I · space+drag to pan",
       "wiki": "Click to select · double-click to read"
     },
+    "timeline": "Timeline filter",
     "peek": {
       "read": "Read full note",
       "hint": "Double-click to read",
-      "dismiss": "Clear selection"
+      "dismiss": "Clear selection",
+      "focusLocal": "Focus links",
+      "unfocusLocal": "Show all"
     },
     "menu": {
       "addTextHere": "Type here",
@@ -159,11 +162,14 @@
     "failed": "Failed",
     "empty": "No tasks yet",
     "stage": {
+      "setup": "Setup",
       "resolve": "Resolving",
       "download": "Downloading",
       "model": "Understanding",
       "write": "Writing note"
-    }
+    },
+    "complete": "Completed",
+    "dismiss": "Dismiss"
   },
   "library": {
     "empty": "Your shelf is empty",
@@ -188,9 +194,16 @@
     "saving": "Saving...",
     "saved": "Saved",
     "saveFailed": "Save failed",
-    "cancel": "Cancel"
+    "unsaved": "Unsaved changes",
+    "cancel": "Cancel",
+    "history": "History",
+    "historyTitle": "Version History",
+    "restore": "Restore version",
+    "noHistory": "No history available",
+    "viewingVersion": "Viewing history version from:"
   },
   "search": {
+    "notFound": "Not found",
     "noResults": "No results found",
     "wikilinkTitle": "Search note links",
     "wikilinkPlaceholder": "Type a note title…",
@@ -224,6 +237,10 @@
     "languageSystem": "System",
     "languageZh": "中文",
     "languageEn": "English",
+    "theme": "Theme",
+    "themeSystem": "System",
+    "themeLight": "Light",
+    "themeDark": "Dark",
     "outputLanguage": "AI Output Language",
     "promptTemplate": "Custom Prompt (optional)",
     "promptTemplatePlaceholder": "Leave empty to use default prompt, fill to override",
@@ -285,7 +302,39 @@
     "typography": "Typography",
     "fontFamily": "Font family",
     "fontSize": "Font size",
-    "lineHeight": "Line height"
+    "lineHeight": "Line height",
+    "fontSerif": "Serif (Georgia)",
+    "fontSans": "Sans-serif (Inter)",
+    "fontMono": "Monospace",
+    "cloudProviders": "Cloud Providers",
+    "modalityRouter": "Modality Router",
+    "videoProcessing": "Video Processing",
+    "frameRate": "Frame Rate (FPS)",
+    "frameRateHint": "Higher FPS for fast motion. Lectures: 0.5~1, Sports: 2~5",
+    "maxFrames": "Max Frames",
+    "frameScale": "Frame Scale",
+    "frameScaleOriginal": "Original",
+    "contextSize": "Context Size (num_ctx)",
+    "contextSizeHint": "Gemma4 supports 256K, but 16K is enough for 30s segments. Larger = slower.",
+    "audioExtraction": "Audio Extraction",
+    "audioExtractionHint": "Extract audio track from video (for audio models)",
+    "networkProxy": "Network & Proxy",
+    "httpProxy": "HTTP Proxy",
+    "httpProxyPlaceholder": "Leave empty for system proxy, e.g. http://127.0.0.1:7890",
+    "githubMirror": "GitHub Download Mirror",
+    "githubMirrorPlaceholder": "Leave empty for direct, e.g. https://mirror.ghproxy.com/",
+    "githubMirrorHint": "Accelerate Ollama binary download.",
+    "ollamaMirror": "Ollama Model Mirror",
+    "ollamaMirrorPlaceholder": "Leave empty for official, e.g. https://mirror.ollama.com",
+    "ollamaMirrorHint": "Model pull acceleration.",
+    "cookiesPlaceholder": "Bilibili cookies file path",
+    "cookiesExportSuccess": "Exported successfully",
+    "cookiesExportFailed": "Export failed",
+    "cookiesExporting": "Exporting...",
+    "cookiesFromChrome": "Export from Chrome",
+    "cookiesFromSafari": "Export from Safari",
+    "cookiesFromFirefox": "Export from Firefox",
+    "cookiesHint": "Must be logged into Bilibili in the browser. Cookies are stored locally only."
   },
   "setup": {
     "localReady": "Local engine is ready",
@@ -327,7 +376,16 @@
     "noCatalogPresets": "No catalog presets (check sidecar connection)",
     "pull": "Pull",
     "deleteModel": "Delete model",
-    "installed": "Installed"
+    "installed": "Installed",
+    "pulling": "Pulling {{model}}",
+    "pullFailed": "Pull failed",
+    "anotherPullInProgress": "Another model pull is already in progress",
+    "modelReady": "Model ready",
+    "downloadingAppOllamaProgress": "Downloading app Ollama",
+    "settingUpRuntime": "Setting up local runtime",
+    "appOllamaReady": "App Ollama ready",
+    "operationFailed": "Operation failed",
+    "pullComplete": "Installed {{name}}"
   },
   "provider": {
     "custom": "Custom…",
@@ -337,6 +395,33 @@
     "localPullHint": "Pull a preset model in the Ollama panel above first; installed models appear here.",
     "commaSeparated": "Comma-separated, auto-rotation"
   },
+  "log": {
+    "filterLogs": "Filter logs…",
+    "autoScroll": "Auto-scroll",
+    "noLogs": "No logs yet",
+    "noMatchingLogs": "No matching logs",
+    "entries": "entries"
+  },
+  "task": {
+    "eta": "ETA",
+    "hideBackground": "Hide (continues in background)",
+    "cancel": "Cancel",
+    "dismiss": "Dismiss",
+    "activeCount": "{{count}} active",
+    "completedCount": "{{count}} completed"
+  },
+  "modalityRouter": {
+    "defaultProvider": "Default Provider",
+    "perModalityOverrides": "Per-modality overrides",
+    "default": "Default",
+    "video": "Video",
+    "image": "Image",
+    "audio": "Audio",
+    "article": "Article"
+  },
+  "progress": {
+    "eta": "ETA {{eta}}"
+  },
   "errors": {
     "invalidUrl": "Enter a valid URL or choose a file",
     "sidecarOffline": "Engine offline — showing demo data",
@@ -344,5 +429,67 @@
     "failed": "Understanding failed",
     "engineOffline": "Engine offline — restart the app or check that the sidecar is running.",
     "configSyncFailed": "Failed to sync settings with engine. Check that the sidecar is running."
+  },
+  "qa": {
+    "tab": "AI Assistant",
+    "captureTab": "Capture",
+    "placeholder": "Ask your knowledge base...",
+    "send": "Send",
+    "sources": "Sources",
+    "empty": "Ask your personal knowledge base",
+    "emptyHint": "AI will search all notes and compile a comprehensive answer with source citations",
+    "loading": "AI is thinking..."
+  },
+  "review": {
+    "button": "Daily Review",
+    "title": "Daily Review",
+    "subtitle": "Review 5 notes a day to strengthen your memory.",
+    "cardProgress": "Progress: {{current}} / {{total}}",
+    "reveal": "Click to flip and reveal card",
+    "showBack": "Summary / Key Points",
+    "empty": "No reviews due today",
+    "emptyHint": "You've reviewed all notes, or there are not enough notes in your vault yet.",
+    "forgot": "Forgot / Hard",
+    "good": "Remembered / Good",
+    "easy": "Perfect / Easy",
+    "complete": "Congratulations!",
+    "completeHint": "You reviewed {{count}} notes today. Keep it up!",
+    "close": "Close",
+    "openNote": "Open Note Details"
+  },
+  "shortcuts": {
+    "title": "Keyboard Shortcuts",
+    "help": "Show keyboard shortcuts",
+    "search": "Search shortcuts…",
+    "noMatches": "No matching shortcuts",
+    "scope": {
+      "global": "Global",
+      "map": "Map",
+      "editor": "Editor",
+      "reader": "Reader"
+    },
+    "commandPalette": "Command palette",
+    "newNote": "New note",
+    "editToggle": "Toggle edit mode",
+    "save": "Save",
+    "drawToggle": "Toggle draw mode",
+    "settings": "Open settings",
+    "viewCapture": "Switch to Capture",
+    "viewVault": "Switch to Stickies",
+    "viewMap": "Switch to Map",
+    "viewJournal": "Switch to Timeline",
+    "searchNotes": "Search notes",
+    "toggleSidebar": "Toggle sidebar",
+    "startUnderstand": "Start understanding",
+    "mapToolSelect": "Select tool",
+    "mapToolText": "Text tool",
+    "mapToolPen": "Pen tool",
+    "mapToolHighlighter": "Highlighter tool",
+    "mapToolEraser": "Eraser tool",
+    "mapToolImage": "Image tool",
+    "mapDelete": "Delete selected",
+    "mapEscape": "Cancel / Deselect",
+    "readerEscape": "Close reader",
+    "wikilinkSearch": "Search note links"
   }
 }

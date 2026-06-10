@@ -92,7 +92,9 @@ def _ram_gb() -> float:
 
 def _mac_chip_name() -> str:
     try:
-        out = subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"], text=True).strip()
+        out = subprocess.check_output(
+            ["sysctl", "-n", "machdep.cpu.brand_string"], text=True
+        ).strip()
         return out or "Apple Silicon"
     except Exception:
         return "Apple Silicon"
@@ -133,12 +135,13 @@ def _amd_vram() -> float:
             if "Total" in line and ("Memory" in line or "Mem" in line):
                 # Extract number (could be in bytes, KB, MB, or GB)
                 import re
+
                 nums = re.findall(r"[\d.]+", line)
                 if nums:
                     val = float(nums[0])
                     # If > 1000, assume bytes → convert to GB
                     if val > 1_000_000:
-                        return val / (1024 ** 3)
+                        return val / (1024**3)
                     # If > 10, assume MB → convert to GB
                     if val > 10:
                         return val / 1024

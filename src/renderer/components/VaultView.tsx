@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Pin, Plus } from 'lucide-react'
+import { Pin, Plus, Brain } from 'lucide-react'
 import { libraryItemMatchesQuery } from '../lib/libraryFilter'
 import { useAppStore } from '../stores/appStore'
 import type { LibraryItem } from '../stores/types'
@@ -13,6 +13,7 @@ import {
 } from '../lib/vaultBoard'
 import { StickyNoteCard } from './StickyNoteCard'
 import { ContextMenu, type ContextMenuEntry } from './ContextMenu'
+import { DailyReview } from './DailyReview'
 
 type MenuState = {
   x: number
@@ -78,6 +79,7 @@ export function VaultView(): React.JSX.Element {
   const [editingSlug, setEditingSlug] = useState<string | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [instantSlug, setInstantSlug] = useState<string | null>(null)
+  const [showReview, setShowReview] = useState(false)
   const movedRef = useRef(false)
 
   const pinned = useMemo(() => pinnedItems(library, pinnedSlugs), [library, pinnedSlugs])
@@ -364,6 +366,10 @@ export function VaultView(): React.JSX.Element {
         <span className="view-toolbar-meta">{t('vault.pinnedCount', { count: pinned.length })}</span>
         <span className="view-toolbar-spacer" />
         <div className="view-toolbar-actions">
+          <button type="button" className="btn-ghost" onClick={() => setShowReview(true)}>
+            <Brain size={14} className="text-[var(--color-accent)]" />
+            {t('review.button', { defaultValue: 'Daily Review' })}
+          </button>
           <button type="button" className="btn-ghost" onClick={() => spawnAtCenter()}>
             <Plus size={14} />
             {t('vault.newSticky')}
@@ -431,6 +437,7 @@ export function VaultView(): React.JSX.Element {
       </div>
 
       {menu ? <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} /> : null}
+      {showReview && <DailyReview onClose={() => setShowReview(false)} />}
     </div>
   )
 }

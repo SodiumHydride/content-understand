@@ -8,7 +8,9 @@ import os
 import uuid
 from typing import Any
 
-from content_understand.resolvers._ssrf import validate_url_not_ssrf
+from content_understand.resolvers._ssrf import (
+    validate_url_not_ssrf,  # yt-dlp does its own HTTP; keep DNS precheck
+)
 from content_understand.resolvers.base import Resolver, ResolveResult
 
 logger = logging.getLogger(__name__)
@@ -47,9 +49,7 @@ class YtdlpResolver(Resolver):
         quality = ctx.get("quality", 360)
 
         os.makedirs(cache_dir, exist_ok=True)
-        output_template = os.path.join(
-            cache_dir, f"%(id)s_{uuid.uuid4().hex[:8]}.%(ext)s"
-        )
+        output_template = os.path.join(cache_dir, f"%(id)s_{uuid.uuid4().hex[:8]}.%(ext)s")
 
         on_progress = (ctx or {}).get("on_progress")
 
@@ -60,7 +60,9 @@ class YtdlpResolver(Resolver):
                     pct = int(float(pct_str))
                 except (ValueError, TypeError):
                     pct = 0
-                on_progress("download", 5 + int(pct * 0.25), f"Downloading: {d.get('_percent_str', '')}")
+                on_progress(
+                    "download", 5 + int(pct * 0.25), f"Downloading: {d.get('_percent_str', '')}"
+                )
 
         ydl_opts = {
             "quiet": True,
@@ -71,6 +73,10 @@ class YtdlpResolver(Resolver):
             "socket_timeout": 30,
             "progress_hooks": [_progress_hook],
         }
+
+        proxy = os.environ.get("https_proxy") or os.environ.get("http_proxy")
+        if proxy:
+            ydl_opts["proxy"] = proxy
 
         if cookies_file and os.path.isfile(cookies_file):
             ydl_opts["cookiefile"] = cookies_file

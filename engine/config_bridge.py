@@ -5,6 +5,7 @@ Handles both new (providers-based) and legacy (flat) settings formats.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import Any
 
@@ -71,10 +72,8 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
     rt.set_prefer_user_ollama(bool(data.get("useOllamaIfAvailable", True)))
     preset_id = (data.get("localPresetId") or "").strip()
     if preset_id:
-        try:
+        with contextlib.suppress(ValueError):
             rt.apply_preset(preset_id)
-        except ValueError:
-            pass
     local_base = rt.resolve_local_base_url(inference_mode)
 
     # Build BackendConfig for each enabled provider
@@ -135,10 +134,7 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
             backend_mapping[ct] = default_provider
 
     # Apply inference mode overrides
-    if inference_mode == "local_only":
-        for ct in content_types:
-            backend_mapping[ct] = "local_server"
-    elif inference_mode == "prefer_local" and local_base:
+    if inference_mode == "local_only" or (inference_mode == "prefer_local" and local_base):
         for ct in content_types:
             backend_mapping[ct] = "local_server"
 
@@ -149,7 +145,7 @@ def _new_format(data: dict[str, Any]) -> ContentConfig:
 
     # Extract frame settings from UI
     frame_settings = data.get("frameSettings", {})
-    audio_settings = data.get("audioExtractSettings", {})
+    data.get("audioExtractSettings", {})
     proxy_settings = data.get("proxySettings", {})
 
     return ContentConfig(
@@ -331,9 +327,7 @@ def _validate_backend_mapping(
         )
     for ct, pid in backend_mapping.items():
         if pid not in backends:
-            raise ValueError(
-                f"Provider '{pid}' for {ct} is not enabled or missing API keys."
-            )
+            raise ValueError(f"Provider '{pid}' for {ct} is not enabled or missing API keys.")
 
 
 def _apply_local_modality_models(local_bc: BackendConfig, rt) -> None:
@@ -357,9 +351,7 @@ def _apply_local_modality_models(local_bc: BackendConfig, rt) -> None:
     installed_models: set[str] = set()
     if local_bc.api_base:
         try:
-            r = requests.get(
-                f"{local_bc.api_base.rstrip('/')}/models", timeout=5
-            )
+            r = requests.get(f"{local_bc.api_base.rstrip('/')}/models", timeout=5)
             if r.status_code == 200:
                 for m in r.json().get("data", []):
                     installed_models.add(m.get("id", ""))
@@ -385,7 +377,9 @@ def _apply_local_modality_models(local_bc: BackendConfig, rt) -> None:
             logger.warning(
                 "Model '%s' for %s is not installed in Ollama. "
                 "Available: %s. The request will likely fail with 404.",
-                value, modality, ", ".join(sorted(installed_models)) or "(none)",
+                value,
+                modality,
+                ", ".join(sorted(installed_models)) or "(none)",
             )
 
         if modality == "article" and attr == "model":

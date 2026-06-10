@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -9,9 +10,7 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
-
-from content_understand.resolvers._ssrf import validate_url_not_ssrf
+from content_understand.resolvers._ssrf import create_safe_session
 from content_understand.resolvers.base import Resolver, ResolveResult
 
 logger = logging.getLogger(__name__)
@@ -39,13 +38,11 @@ class HttpPageResolver(Resolver):
         if not input.startswith(("http://", "https://")):
             return False
         parsed = urlparse(input)
-        host = (parsed.netloc or "").lower().lstrip("www.")
+        host = (parsed.netloc or "").lower().removeprefix("www.")
         path = (parsed.path or "").lower()
         if any(frag in host for frag in _VIDEO_HOST_FRAGMENTS):
             return False
-        if "bilibili" in host and ("/video/" in path or "bv" in path):
-            return False
-        return True
+        return not ("bilibili" in host and ("/video/" in path or "bv" in path))
 
     def resolve(self, input: str, ctx: dict[str, Any] | None = None) -> ResolveResult:
         ctx = ctx or {}
@@ -56,11 +53,12 @@ class HttpPageResolver(Resolver):
 
         os.makedirs(cache_dir, exist_ok=True)
 
-        validate_url_not_ssrf(input)
+        session = create_safe_session()
 
-        r = requests.get(
+        r = session.get(
             input,
             timeout=timeout,
+            stream=True,
             headers={
                 "User-Agent": "Mozilla/5.0 (compatible; content-understand/1.0)",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -81,11 +79,21 @@ class HttpPageResolver(Resolver):
         filename = f"page_{uuid.uuid4().hex[:12]}{ext}"
         local_path = os.path.join(cache_dir, filename)
 
-        with open(local_path, "wb") as f:
-            f.write(r.content)
+        # Stream write with size limit
+        raw_chunks: list[bytes] = []
+        size = 0
+        for chunk in session.safe_iter_content(r, chunk_size=8192):
+            raw_chunks.append(chunk)
+            size += len(chunk)
 
-        size = len(r.content)
-        title = _extract_title(r.text) if content_type == "text/html" else ""
+        raw_body = b"".join(raw_chunks)
+        with open(local_path, "wb") as f:
+            f.write(raw_body)
+
+        title = ""
+        if content_type == "text/html":
+            with contextlib.suppress(Exception):
+                title = _extract_title(raw_body.decode(errors="replace"))
 
         return ResolveResult(
             local_path=local_path,

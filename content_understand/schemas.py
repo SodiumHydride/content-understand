@@ -21,33 +21,25 @@ from pydantic import BaseModel, Field
 class VideoAnalysis(BaseModel):
     """Structured output schema for video understanding."""
 
-    summary: str = Field(
-        description="2-3 sentence overview of the video's main content and value"
-    )
+    summary: str = Field(description="2-3 sentence overview of the video's main content and value")
     key_points: list[str] = Field(
         description="3-8 core takeaways from the video",
         min_length=1,
         max_length=12,
     )
-    detailed_content: str = Field(
-        description="Detailed analysis organized by timeline or theme"
-    )
+    detailed_content: str = Field(description="Detailed analysis organized by timeline or theme")
     tags: list[str] = Field(
         description="5-10 relevant tags WITHOUT # prefix",
         min_length=1,
         max_length=15,
     )
-    conclusion: str = Field(
-        description="2-3 sentence summary of core value and takeaway"
-    )
+    conclusion: str = Field(description="2-3 sentence summary of core value and takeaway")
 
 
 class ImageAnalysis(BaseModel):
     """Structured output schema for image understanding."""
 
-    summary: str = Field(
-        description="Main content description of the image"
-    )
+    summary: str = Field(description="Main content description of the image")
     key_elements: list[str] = Field(
         description="Key visual elements identified in the image",
         min_length=1,
@@ -58,9 +50,7 @@ class ImageAnalysis(BaseModel):
         min_length=1,
         max_length=15,
     )
-    conclusion: str = Field(
-        description="1-2 sentence summary of the image's message"
-    )
+    conclusion: str = Field(description="1-2 sentence summary of the image's message")
 
 
 class TimelineSegment(BaseModel):
@@ -74,9 +64,7 @@ class TimelineSegment(BaseModel):
 class AudioAnalysis(BaseModel):
     """Structured output schema for audio understanding."""
 
-    summary: str = Field(
-        description="2-3 sentence overview of the audio content"
-    )
+    summary: str = Field(description="2-3 sentence overview of the audio content")
     timeline: list[TimelineSegment] = Field(
         description="Timeline segments with time ranges and descriptions",
         min_length=1,
@@ -95,33 +83,25 @@ class AudioAnalysis(BaseModel):
         min_length=1,
         max_length=15,
     )
-    conclusion: str = Field(
-        description="2-3 sentence summary of the audio's core message"
-    )
+    conclusion: str = Field(description="2-3 sentence summary of the audio's core message")
 
 
 class ArticleAnalysis(BaseModel):
     """Structured output schema for article/text understanding."""
 
-    summary: str = Field(
-        description="2-3 sentence overview of the article"
-    )
+    summary: str = Field(description="2-3 sentence overview of the article")
     key_points: list[str] = Field(
         description="3-8 core takeaways from the article",
         min_length=1,
         max_length=12,
     )
-    detailed_content: str = Field(
-        description="Detailed analysis organized by argument or theme"
-    )
+    detailed_content: str = Field(description="Detailed analysis organized by argument or theme")
     tags: list[str] = Field(
         description="5-10 relevant tags WITHOUT # prefix",
         min_length=1,
         max_length=15,
     )
-    conclusion: str = Field(
-        description="2-3 sentence summary of the article's core message"
-    )
+    conclusion: str = Field(description="2-3 sentence summary of the article's core message")
 
 
 # ── Schema registry ─────────────────────────────────────────────────
@@ -175,7 +155,10 @@ Requirements:
 - Ensure output matches all fields and types in the schema above"""
 
 _CONTENT_TYPE_DESC = {
-    "video": {"zh": "视频（包括画面和音频内容）", "en": "video (including visual and audio content)"},
+    "video": {
+        "zh": "视频（包括画面和音频内容）",
+        "en": "video (including visual and audio content)",
+    },
     "image": {"zh": "图片", "en": "image"},
     "audio": {"zh": "音频", "en": "audio"},
     "article": {"zh": "文章", "en": "article"},
@@ -195,6 +178,7 @@ def build_structured_prompt(
     schema_class = get_schema_for_type(content_type)
     schema_json = schema_class.model_json_schema()
     import json
+
     schema_str = json.dumps(schema_json, indent=2, ensure_ascii=False)
 
     desc = _CONTENT_TYPE_DESC.get(content_type, {}).get(language, content_type)

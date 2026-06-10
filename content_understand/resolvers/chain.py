@@ -33,10 +33,7 @@ class ResolverChain:
                 errors.append((resolver.name, str(e)))
                 continue
 
-        raise RuntimeError(
-            f"No resolver could handle: {input[:200]}\n"
-            f"Errors: {errors}"
-        )
+        raise RuntimeError(f"No resolver could handle: {input[:200]}\nErrors: {errors}")
 
     def add_resolver(self, resolver: Resolver) -> None:
         self.resolvers.append(resolver)

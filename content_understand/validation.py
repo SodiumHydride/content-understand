@@ -191,7 +191,11 @@ def _fallback_extract(raw: str, content_type: str) -> dict[str, Any]:
     tags = list(dict.fromkeys(tags))[:10]  # dedupe, cap at 10
 
     # Try to find a summary-like first paragraph
-    lines = [line.strip() for line in raw.split("\n") if line.strip() and not line.strip().startswith("#")]
+    lines = [
+        line.strip()
+        for line in raw.split("\n")
+        if line.strip() and not line.strip().startswith("#")
+    ]
     summary = lines[0] if lines else raw[:500]
 
     base = {

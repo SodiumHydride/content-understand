@@ -5,11 +5,11 @@ import { useTranslation } from 'react-i18next'
 import type { ModalityRoute, ProviderConfig, ProviderId } from '../stores/types'
 import { Select, type SelectOption } from './Select'
 
-const MODALITY_LABELS: Record<string, { zh: string; en: string }> = {
-  video: { zh: '视频', en: 'Video' },
-  image: { zh: '图片', en: 'Image' },
-  audio: { zh: '音频', en: 'Audio' },
-  article: { zh: '文章', en: 'Article' }
+const MODALITY_KEYS: Record<string, string> = {
+  video: 'modalityRouter.video',
+  image: 'modalityRouter.image',
+  audio: 'modalityRouter.audio',
+  article: 'modalityRouter.article'
 }
 
 interface ModalityRouterProps {
@@ -18,7 +18,6 @@ interface ModalityRouterProps {
   overrides: Record<string, ModalityRoute>
   onDefaultChange: (providerId: ProviderId) => void
   onOverrideChange: (modality: string, route: ModalityRoute) => void
-  isZh: boolean
 }
 
 export function ModalityRouter({
@@ -26,8 +25,7 @@ export function ModalityRouter({
   defaultProvider,
   overrides,
   onDefaultChange,
-  onOverrideChange,
-  isZh
+  onOverrideChange
 }: ModalityRouterProps): React.JSX.Element {
   const { t } = useTranslation()
   const [expanded, setExpanded] = React.useState(false)
@@ -66,7 +64,7 @@ export function ModalityRouter({
       {/* Default provider */}
       <div className="flex items-center gap-3 px-3 py-2.5">
         <span className="text-[12px] font-semibold text-ink-800">
-          {isZh ? '默认 Provider' : 'Default Provider'}
+          {t('modalityRouter.defaultProvider')}
         </span>
         <div className="flex-1">
           <Select
@@ -88,13 +86,13 @@ export function ModalityRouter({
           size={12}
           className={clsx('transition-transform', expanded && 'rotate-180')}
         />
-        {isZh ? '按模态覆盖' : 'Per-modality overrides'}
+        {t('modalityRouter.perModalityOverrides')}
       </button>
 
       {/* Per-modality overrides */}
       {expanded && (
         <div className="border-t border-[var(--divider)]">
-          {Object.entries(MODALITY_LABELS).map(([modality, label]) => {
+          {Object.entries(MODALITY_KEYS).map(([modality, labelKey]) => {
             const route = getEffectiveRoute(modality)
             const isOverridden = !!route.providerId
             return (
@@ -103,13 +101,13 @@ export function ModalityRouter({
                 className="flex items-center gap-2 border-b border-[var(--divider)] px-3 py-2 last:border-b-0"
               >
                 <span className="w-12 shrink-0 text-[11px] font-medium text-ink-600">
-                  {isZh ? label.zh : label.en}
+                  {t(labelKey)}
                 </span>
                 <div className="w-28">
                   <Select
                     value={route.providerId || ''}
                     options={[
-                      { value: '', label: isZh ? '默认' : 'Default' },
+                      { value: '', label: t('modalityRouter.default') },
                       ...providerOptions
                     ]}
                     onChange={(v) => {

@@ -165,9 +165,7 @@ def build_catalog_view(
     app_download_progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Merge presets with install state for the settings UI."""
-    installed_by_preset = {
-        m["preset_id"]: m for m in filter_installed_models(installed_raw)
-    }
+    installed_by_preset = {m["preset_id"]: m for m in filter_installed_models(installed_raw)}
     presets_out: list[dict[str, Any]] = []
     for entry in catalog_entries():
         inst = installed_by_preset.get(entry["preset_id"])
@@ -229,13 +227,15 @@ def installed_non_preset_models(
         # Also skip if a preset maps to this installed name
         if preset_for_model(name) is not None:
             continue
-        out.append({
-            "name": name,
-            "size": raw.get("size", 0),
-            "modified_at": raw.get("modified_at", ""),
-            "details": raw.get("details"),
-            "modalities_guess": _guess_modalities(name),
-        })
+        out.append(
+            {
+                "name": name,
+                "size": raw.get("size", 0),
+                "modified_at": raw.get("modified_at", ""),
+                "details": raw.get("details"),
+                "modalities_guess": _guess_modalities(name),
+            }
+        )
     logger.debug("Found %d non-preset installed models", len(out))
     return out
 

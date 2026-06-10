@@ -16,7 +16,9 @@ def export_browser_cookies(browser: str, dest: Path) -> int:
     """Write Netscape cookie jar from *browser* to *dest*. Returns byte size."""
     name = (browser or "chrome").strip().lower()
     if name not in _SUPPORTED:
-        raise ValueError(f"Unsupported browser '{browser}'. Use one of: {', '.join(sorted(_SUPPORTED))}")
+        raise ValueError(
+            f"Unsupported browser '{browser}'. Use one of: {', '.join(sorted(_SUPPORTED))}"
+        )
 
     try:
         from yt_dlp.cookies import extract_cookies_from_browser

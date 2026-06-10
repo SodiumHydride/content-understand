@@ -48,9 +48,7 @@ class SearchEngineResolver(Resolver):
         if direct.can_resolve(real_url):
             return direct.resolve(real_url, ctx)
 
-        raise RuntimeError(
-            f"Extracted URL is not a direct media link: {real_url[:100]}"
-        )
+        raise RuntimeError(f"Extracted URL is not a direct media link: {real_url[:100]}")
 
     def _extract_media_url(self, url: str) -> str:
         parsed = urlparse(url)

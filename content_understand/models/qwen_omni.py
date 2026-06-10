@@ -76,13 +76,21 @@ class QwenOmniModel(ContentModel):
         json_schema: dict | None = None,
     ) -> str | dict:
         if bundle.content_type == "video":
-            return self._understand_video(bundle, prompt, timeout, language, output_format, json_schema)
+            return self._understand_video(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
         elif bundle.content_type == "audio":
-            return self._understand_audio(bundle, prompt, timeout, language, output_format, json_schema)
+            return self._understand_audio(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
         elif bundle.content_type == "image":
-            return self._understand_image(bundle, prompt, timeout, language, output_format, json_schema)
+            return self._understand_image(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
         else:
-            return self._understand_text(bundle, prompt, timeout, language, output_format, json_schema)
+            return self._understand_text(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
 
     def _understand_video(
         self,
@@ -104,25 +112,31 @@ class QwenOmniModel(ContentModel):
             for frame_path in bundle.frames:
                 b64 = self._file_to_base64(str(frame_path))
                 if b64:
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                    })
+                    content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                        }
+                    )
         elif bundle.video_path:
             # Pass video file path (for vLLM/SGLang with local file access)
-            content.append({
-                "type": "video_url",
-                "video_url": {"url": bundle.video_path},
-            })
+            content.append(
+                {
+                    "type": "video_url",
+                    "video_url": {"url": bundle.video_path},
+                }
+            )
 
         # Add separated audio if available
         if bundle.audio_path and bundle.audio_path != bundle.video_path:
             audio_b64 = self._file_to_base64(bundle.audio_path)
             if audio_b64:
-                content.append({
-                    "type": "input_audio",
-                    "input_audio": {"data": audio_b64, "format": "wav"},
-                })
+                content.append(
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": audio_b64, "format": "wav"},
+                    }
+                )
 
         # Add prompt
         content.append({"type": "text", "text": prompt or self._default_prompt(language)})
@@ -142,10 +156,12 @@ class QwenOmniModel(ContentModel):
         if bundle.audio_path:
             audio_b64 = self._file_to_base64(bundle.audio_path)
             if audio_b64:
-                content.append({
-                    "type": "input_audio",
-                    "input_audio": {"data": audio_b64, "format": "wav"},
-                })
+                content.append(
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": audio_b64, "format": "wav"},
+                    }
+                )
         content.append({"type": "text", "text": prompt or self._default_audio_prompt(language)})
         return self._chat(content, timeout, output_format)
 
@@ -162,10 +178,12 @@ class QwenOmniModel(ContentModel):
         for img_path in bundle.images:
             b64 = self._file_to_base64(str(img_path))
             if b64:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                })
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                    }
+                )
         content.append({"type": "text", "text": prompt or self._default_prompt(language)})
         return self._chat(content, timeout, output_format)
 
@@ -206,6 +224,7 @@ class QwenOmniModel(ContentModel):
             # Parse JSON if structured output was requested
             if output_format == "json":
                 import json
+
                 try:
                     return json.loads(content_text)
                 except json.JSONDecodeError:

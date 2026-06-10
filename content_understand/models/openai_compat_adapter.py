@@ -34,22 +34,28 @@ class OpenAICompatAdapter(ContentModel):
 
     def __init__(self, config: Any) -> None:
         self.config = config
-        self._is_local = "127.0.0.1" in (config.api_base or "") or "localhost" in (config.api_base or "")
+        self._is_local = "127.0.0.1" in (config.api_base or "") or "localhost" in (
+            config.api_base or ""
+        )
         self._models: dict[str, Any] = {}
 
     def _get_model(self, model_type: str) -> Any:
         if model_type not in self._models:
             if model_type == "video":
                 from content_understand.models.openai_compat import OpenAICompatModel
+
                 self._models[model_type] = OpenAICompatModel(self.config)
             elif model_type == "image":
                 from content_understand.models.openai_compat_image import OpenAICompatImageModel
+
                 self._models[model_type] = OpenAICompatImageModel(self.config)
             elif model_type == "audio":
                 from content_understand.models.openai_compat_audio import OpenAICompatAudioModel
+
                 self._models[model_type] = OpenAICompatAudioModel(self.config)
             elif model_type == "article":
                 from content_understand.models.openai_compat_article import OpenAICompatArticleModel
+
                 self._models[model_type] = OpenAICompatArticleModel(self.config)
         return self._models.get(model_type)
 
@@ -83,7 +89,9 @@ class OpenAICompatAdapter(ContentModel):
         json_schema: dict | None = None,
     ) -> str | dict:
         if bundle.content_type == "video":
-            return self._understand_video(bundle, prompt, timeout, language, output_format, json_schema)
+            return self._understand_video(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
         elif bundle.content_type == "audio":
             return self._understand_audio(bundle, prompt, timeout, language)
         elif bundle.content_type == "image":
@@ -105,10 +113,13 @@ class OpenAICompatAdapter(ContentModel):
         if bundle.frames:
             # Frames already extracted by preprocessor — use them directly
             import base64
+
             frames_b64 = []
             for f in bundle.frames:
                 frames_b64.append(base64.b64encode(f.read_bytes()).decode())
-            return model._analyze_frames(frames_b64, prompt or model._default_prompt(language), timeout)
+            return model._analyze_frames(
+                frames_b64, prompt or model._default_prompt(language), timeout
+            )
         elif bundle.video_path:
             return model.understand_video(
                 video_path=bundle.video_path,

@@ -13,6 +13,8 @@ interface MapNodePos {
 interface WikiEdgeLayerProps {
   layout: Record<string, MapNodePos>
   highlightSlug: string | null
+  clusters?: { tag: string; cx: number; cy: number; r: number }[]
+  visibleSlugs?: Set<string>
 }
 
 function buildPath(src: MapNodePos, tgt: MapNodePos): string {
@@ -34,7 +36,7 @@ function buildPath(src: MapNodePos, tgt: MapNodePos): string {
   return `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`
 }
 
-export function WikiEdgeLayer({ layout, highlightSlug }: WikiEdgeLayerProps): React.JSX.Element | null {
+export function WikiEdgeLayer({ layout, highlightSlug, clusters, visibleSlugs }: WikiEdgeLayerProps): React.JSX.Element | null {
   const library = useAppStore((s) => s.library)
 
   const { data: graph } = useQuery({
@@ -57,6 +59,7 @@ export function WikiEdgeLayer({ layout, highlightSlug }: WikiEdgeLayerProps): Re
     const seen = new Set<string>()
     return graph.edges.filter((e) => {
       if (!layout[e.source_slug] || !layout[e.target_slug]) return false
+      if (visibleSlugs && (!visibleSlugs.has(e.source_slug) || !visibleSlugs.has(e.target_slug))) return false
       const key = e.source_slug < e.target_slug
         ? `${e.source_slug}|${e.target_slug}`
         : `${e.target_slug}|${e.source_slug}`
@@ -64,7 +67,7 @@ export function WikiEdgeLayer({ layout, highlightSlug }: WikiEdgeLayerProps): Re
       seen.add(key)
       return true
     })
-  }, [graph?.edges, layout])
+  }, [graph?.edges, layout, visibleSlugs])
 
   // Compute SVG dimensions from layout extents
   const svgSize = useMemo(() => {
@@ -88,6 +91,36 @@ export function WikiEdgeLayer({ layout, highlightSlug }: WikiEdgeLayerProps): Re
       height={svgSize.height}
       viewBox={`0 0 ${svgSize.width} ${svgSize.height}`}
     >
+      {/* Clusters background */}
+      {clusters && clusters.map((c) => (
+        <g key={c.tag}>
+          <circle
+            cx={c.cx}
+            cy={c.cy}
+            r={c.r}
+            fill="rgba(126, 184, 154, 0.01)"
+            stroke="var(--color-accent-soft)"
+            strokeWidth={1}
+            strokeDasharray="4 6"
+            opacity={highlightSlug !== null ? 0.2 : 0.8}
+            className="transition-opacity duration-200"
+          />
+          <text
+            x={c.cx}
+            y={c.cy - c.r + 20}
+            textAnchor="middle"
+            fill="var(--color-ink-500)"
+            fontSize="10px"
+            fontWeight="bold"
+            letterSpacing="0.05em"
+            opacity={highlightSlug !== null ? 0.2 : 0.8}
+            className="transition-opacity duration-200"
+          >
+            #{c.tag.toUpperCase()}
+          </text>
+        </g>
+      ))}
+
       {edges.map((edge) => {
         const srcPos = layout[edge.source_slug]
         const tgtPos = layout[edge.target_slug]

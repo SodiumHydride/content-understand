@@ -66,17 +66,16 @@ function resolveHealth(catalog: OllamaCatalog | null): string | undefined {
 // ── Component ────────────────────────────────────────────────────
 
 interface OllamaPanelProps {
-  isZh: boolean
   useUserOllama: boolean
   onUseUserOllamaChange: (value: boolean) => void
 }
 
 export function OllamaPanel({
-  isZh,
   useUserOllama,
   onUseUserOllamaChange
 }: OllamaPanelProps): React.JSX.Element {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const isZh = i18n.language.startsWith('zh')
   const queryClient = useQueryClient()
   const [loading, setLoading] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
@@ -110,13 +109,13 @@ export function OllamaPanel({
   const health = resolveHealth(catalog)
 
   const operationProgress = useMemo(
-    () => deriveOperationProgress(catalog, presets, isZh, pullTask),
-    [catalog, presets, isZh, pullTask]
+    () => deriveOperationProgress(catalog, presets, t, pullTask),
+    [catalog, presets, t, pullTask]
   )
 
   const handlePull = (preset: RuntimePreset): void => {
     const id = preset.preset_id ?? preset.id
-    pullMutation.mutate({ presetId: id, modelName: preset.ollama_model, isZh })
+    pullMutation.mutate({ presetId: id, modelName: preset.ollama_model })
   }
 
   const handleDelete = (preset: RuntimePreset): void => {
@@ -336,7 +335,7 @@ export function OllamaPanel({
           </div>
         ) : null}
 
-        {operationProgress ? <OperationProgressCard progress={operationProgress} isZh={isZh} /> : null}
+        {operationProgress ? <OperationProgressCard progress={operationProgress} /> : null}
 
         {actionMsg && !opError && !operationProgress ? (
           <p className="text-[11px] text-ink-600">{actionMsg}</p>

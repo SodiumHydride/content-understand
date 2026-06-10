@@ -76,7 +76,11 @@ class OpenAICompatArticleModel(ArticleModel):
     def _call_api(self, body: dict, timeout: int) -> str:
         url = f"{self.api_base}/chat/completions"
         return rotate_request(
-            url, body, self.rotator, timeout, "openai-compat:article",
+            url,
+            body,
+            self.rotator,
+            timeout,
+            "openai-compat:article",
         )
 
     def understand_article(

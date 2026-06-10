@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import logging
 from pathlib import Path
 
@@ -45,7 +46,11 @@ class ClaudeImageModel(ImageModel):
     def _call_api(self, body: dict, timeout: int) -> str:
         url = f"{self.api_base}/v1/messages"
         return rotate_request(
-            url, body, self.rotator, timeout, "claude:image",
+            url,
+            body,
+            self.rotator,
+            timeout,
+            "claude:image",
             headers_factory=_claude_headers,
             response_extractor=_claude_extractor,
         )
@@ -67,16 +72,15 @@ class ClaudeImageModel(ImageModel):
             import os
             import tempfile
 
-            tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-            tmp_path = tmp.name
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
+            os.close(tmp_fd)
             try:
                 r = requests.get(image_url, timeout=30)
                 r.raise_for_status()
-                tmp.write(r.content)
-                tmp.close()
+                with open(tmp_path, "wb") as tmp:
+                    tmp.write(r.content)
                 image_path = tmp_path
             except Exception:
-                tmp.close()
                 os.unlink(tmp_path)
                 raise
 
@@ -88,10 +92,8 @@ class ClaudeImageModel(ImageModel):
             if tmp_path:
                 import os
 
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp_path)
-                except OSError:
-                    pass
 
         content = [
             {

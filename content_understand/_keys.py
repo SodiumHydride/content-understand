@@ -182,7 +182,9 @@ def rotate_request(
             rotator.mark_rate_limited(state, retry_after)
             logger.warning(
                 "[%s] 429 rate limit on key ...%s, cooldown %.0fs",
-                label, key[-4:], retry_after,
+                label,
+                key[-4:],
+                retry_after,
             )
             raise RateLimitError(f"[{label}] 429 rate limit")
 
@@ -195,15 +197,9 @@ def rotate_request(
                 key[-4:],
                 detail,
             )
-            is_local = (
-                key == "local"
-                or "127.0.0.1" in req_url
-                or "localhost" in req_url
-            )
+            is_local = key == "local" or "127.0.0.1" in req_url or "localhost" in req_url
             if is_local:
-                raise RuntimeError(
-                    f"[{label}] HTTP {r.status_code}: {detail or 'server error'}"
-                )
+                raise RuntimeError(f"[{label}] HTTP {r.status_code}: {detail or 'server error'}")
             raise requests.ConnectionError(
                 f"[{label}] HTTP {r.status_code}: {detail or 'server error'}"
             )

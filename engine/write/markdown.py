@@ -7,8 +7,11 @@ Output format matches sodium-core wiki contract (schema v2):
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os as _os
 import re
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -133,8 +136,12 @@ def write_result(vault_path: Path, result: dict) -> Path:
         sources.append(url)
 
     # Build frontmatter
-    tag_yaml = "\n".join(f"  - {t}" for t in tags) if tags else "  - content"
-    source_yaml = "\n".join(f"  - {_yaml_quote(s)}" for s in sources) if sources else "  - legacy:missing-source"
+    tag_yaml = "\n".join(f"  - {_yaml_quote(t)}" for t in tags) if tags else "  - content"
+    source_yaml = (
+        "\n".join(f"  - {_yaml_quote(s)}" for s in sources)
+        if sources
+        else "  - legacy:missing-source"
+    )
 
     frontmatter = f"""---
 title: {_yaml_quote(title)}
@@ -186,12 +193,22 @@ schema_version: 2
 
     # Always add 来源 and 变更记录
     if "来源" not in sections:
-        source_lines = "\n".join(f"- [{platform}]({url})" if url and platform else f"- {url}" for url in sources)
+        source_lines = "\n".join(
+            f"- [{platform}]({url})" if url and platform else f"- {url}" for url in sources
+        )
         body_parts.append(f"## 来源\n{source_lines or '- （待补充）'}\n")
 
     if "变更记录" not in sections:
         body_parts.append(f"## 变更记录\n- {date}: 自动生成\n")
 
     full_content = frontmatter + "\n" + "\n".join(body_parts)
-    path.write_text(full_content, encoding="utf-8")
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with _os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            f.write(full_content)
+        _os.replace(tmp_path, str(path))  # atomic
+    except BaseException:
+        with contextlib.suppress(OSError):
+            _os.unlink(tmp_path)
+        raise
     return path

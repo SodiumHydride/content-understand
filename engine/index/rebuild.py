@@ -17,9 +17,10 @@ from engine.index.db import (
     open_db,
     upsert_link,
     upsert_page,
+    upsert_tags_for_page,
 )
 
-_WIKILINK_RE = re.compile(r'\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]')
+_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]")
 
 
 def extract_wikilinks(body: str) -> list[str]:
@@ -27,9 +28,7 @@ def extract_wikilinks(body: str) -> list[str]:
     return [m.group(1).strip() for m in _WIKILINK_RE.finditer(body)]
 
 
-def _resolve_wikilink_targets(
-    conn, wikilinks: list[str]
-) -> list[tuple[str, str]]:
+def _resolve_wikilink_targets(conn, wikilinks: list[str]) -> list[tuple[str, str]]:
     """Resolve wikilink display names to (raw_link, target_slug) pairs.
 
     Matches each link against page title or slug. Returns only those
@@ -104,20 +103,26 @@ def upsert_single_file(vault_path: Path, md_path: Path) -> bool:
 
     # Hash unchanged → just update mtime and skip content update
     if db_mtime is not None:
-        existing = conn.execute(
-            "SELECT body_hash FROM pages WHERE slug=?", (slug,)
-        ).fetchone()
+        existing = conn.execute("SELECT body_hash FROM pages WHERE slug=?", (slug,)).fetchone()
         if existing and existing[0] == body_hash:
-            conn.execute(
-                "UPDATE pages SET file_mtime=? WHERE slug=?", (disk_mtime, slug)
-            )
+            conn.execute("UPDATE pages SET file_mtime=? WHERE slug=?", (disk_mtime, slug))
             conn.commit()
             return False
 
     # Content changed — full upsert
-    tags = meta.get("tags", "[]")
-    if isinstance(tags, str) and not tags.startswith("["):
-        tags = json.dumps([tags], ensure_ascii=False)
+    raw_tags = meta.get("tags", [])
+    tags_list = []
+    if isinstance(raw_tags, str):
+        if raw_tags.startswith("["):
+            try:
+                tags_list = json.loads(raw_tags)
+            except Exception:
+                tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
+        else:
+            tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
+    elif isinstance(raw_tags, list):
+        tags_list = [str(t).strip() for t in raw_tags if str(t).strip()]
+
     upsert_page(
         conn,
         {
@@ -128,7 +133,7 @@ def upsert_single_file(vault_path: Path, md_path: Path) -> bool:
             "platform": meta.get("platform", ""),
             "url": (meta.get("sources") or meta.get("url") or "")[:500],
             "summary": meta.get("summary", "")[:500],
-            "tags": tags if isinstance(tags, str) else json.dumps(tags, ensure_ascii=False),
+            "tags": json.dumps(tags_list, ensure_ascii=False),
             "body": body,
             "created": meta.get("created", ""),
             "updated": meta.get("updated", datetime.now(timezone.utc).isoformat()),
@@ -136,6 +141,7 @@ def upsert_single_file(vault_path: Path, md_path: Path) -> bool:
             "file_mtime": disk_mtime,
         },
     )
+    upsert_tags_for_page(conn, slug, tags_list)
 
     # Extract and store wikilinks from the body
     wikilinks = extract_wikilinks(body)

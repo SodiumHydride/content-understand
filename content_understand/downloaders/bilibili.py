@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -17,13 +18,12 @@ import yt_dlp
 from content_understand.defaults import BILIBILI_QUALITY_DEFAULT
 from content_understand.downloaders._utils import parse_vtt, safe_int
 from content_understand.downloaders.base import Downloader, VideoInfo
+from content_understand.resolvers._ssrf import create_safe_session
 
 logger = logging.getLogger(__name__)
 
 _BVID_RE = re.compile(r"BV[\w]+")
-_BILIBILI_URL_RE = re.compile(
-    r"(?:https?://)?(?:www\.)?(?:bilibili\.com/video/|b23\.tv/)"
-)
+_BILIBILI_URL_RE = re.compile(r"(?:https?://)?(?:www\.)?(?:bilibili\.com/video/|b23\.tv/)")
 _FULL_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -91,9 +91,7 @@ class BilibiliDownloader(Downloader):
         try:
             return self._get_info_api(bvid)
         except Exception as exc:
-            raise RuntimeError(
-                f"Both yt-dlp and Bilibili API failed for {url}: {exc}"
-            ) from exc
+            raise RuntimeError(f"Both yt-dlp and Bilibili API failed for {url}: {exc}") from exc
 
     def download(self, url: str, output_path: str) -> str:
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -119,8 +117,7 @@ class BilibiliDownloader(Downloader):
         bvid = _extract_bvid(url)
         if not bvid:
             raise RuntimeError(
-                f"All yt-dlp strategies failed and cannot extract BVID from {url}. "
-                f"Errors: {errors}"
+                f"All yt-dlp strategies failed and cannot extract BVID from {url}. Errors: {errors}"
             )
 
         logger.info("Using Bilibili DASH API for %s", bvid)
@@ -237,8 +234,15 @@ class BilibiliDownloader(Downloader):
         # Fallback: search by ID
         video_id = info.get("id", "")
         for candidate in parent.iterdir():
-            if candidate.is_file() and video_id in candidate.name and candidate.suffix in (
-                ".mp4", ".mkv", ".webm",
+            if (
+                candidate.is_file()
+                and video_id in candidate.name
+                and candidate.suffix
+                in (
+                    ".mp4",
+                    ".mkv",
+                    ".webm",
+                )
             ):
                 return str(candidate)
         return None
@@ -249,7 +253,9 @@ class BilibiliDownloader(Downloader):
         r = self._api_get(f"https://api.bilibili.com/x/web-interface/view?bvid={bvid}")
         data = r.json()
         if data.get("code") != 0:
-            raise RuntimeError(f"Bilibili API returned code={data.get('code')}: {data.get('message')}")
+            raise RuntimeError(
+                f"Bilibili API returned code={data.get('code')}: {data.get('message')}"
+            )
         info = data["data"]
         return VideoInfo(
             url=f"https://www.bilibili.com/video/{bvid}/",
@@ -262,7 +268,8 @@ class BilibiliDownloader(Downloader):
         )
 
     def _api_get(self, url: str) -> requests.Response:
-        r = requests.get(url, headers=self._headers, timeout=self.request_timeout)
+        session = create_safe_session()
+        r = session.get(url, headers=self._headers, timeout=self.request_timeout)
         if r.status_code != 200:
             raise RuntimeError(f"Bilibili API HTTP {r.status_code} for {url}")
         return r
@@ -339,11 +346,24 @@ class BilibiliDownloader(Downloader):
 
             proc = subprocess.run(
                 [
-                    self.ffmpeg_path, "-y",
-                    "-i", tmp_video, "-i", tmp_audio,
-                    "-c:v", "libx264", "-preset", "fast", "-crf", "28",
-                    "-c:a", "aac", "-b:a", "64k",
-                    "-movflags", "+faststart",
+                    self.ffmpeg_path,
+                    "-y",
+                    "-i",
+                    tmp_video,
+                    "-i",
+                    tmp_audio,
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "28",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "64k",
+                    "-movflags",
+                    "+faststart",
                     output_path,
                 ],
                 capture_output=True,
@@ -359,10 +379,8 @@ class BilibiliDownloader(Downloader):
             raise RuntimeError("ffmpeg produced empty output file")
         finally:
             for tmp in (tmp_video, tmp_audio):
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp)
-                except OSError:
-                    pass
 
     def _download_single_stream(self, bvid: str, output_path: str) -> str | None:
         cid = self._get_cid(bvid)
@@ -376,7 +394,9 @@ class BilibiliDownloader(Downloader):
             try:
                 return self._download_with_resume(playback_url, output_path)
             except Exception as exc:
-                logger.warning("Single-stream attempt %d/%d failed: %s", attempt + 1, self.max_retries, exc)
+                logger.warning(
+                    "Single-stream attempt %d/%d failed: %s", attempt + 1, self.max_retries, exc
+                )
                 if attempt < self.max_retries - 1:
                     time.sleep(2 * (attempt + 1))
                     continue
@@ -390,7 +410,8 @@ class BilibiliDownloader(Downloader):
             downloaded = os.path.getsize(output_path)
             headers["Range"] = f"bytes={downloaded}-"
 
-        r = requests.get(url, headers=headers, timeout=300, stream=True)
+        session = create_safe_session()
+        r = session.get(url, headers=headers, timeout=300, stream=True)
         if r.status_code == 416:
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
                 return output_path
@@ -400,7 +421,7 @@ class BilibiliDownloader(Downloader):
 
         mode = "ab" if downloaded > 0 else "wb"
         with open(output_path, mode) as f:
-            for chunk in r.iter_content(chunk_size=65536):
+            for chunk in session.safe_iter_content(r, chunk_size=65536):
                 f.write(chunk)
 
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
@@ -410,16 +431,19 @@ class BilibiliDownloader(Downloader):
     def _download_stream(self, url: str, dest: str, *, timeout: int) -> None:
         for attempt in range(self.max_retries):
             try:
-                r = requests.get(url, headers=self._headers, stream=True, timeout=timeout)
+                session = create_safe_session()
+                r = session.get(url, headers=self._headers, stream=True, timeout=timeout)
                 if r.status_code != 200:
                     raise RuntimeError(f"HTTP {r.status_code}")
                 with open(dest, "wb") as f:
-                    for chunk in r.iter_content(65536):
+                    for chunk in session.safe_iter_content(r, chunk_size=65536):
                         f.write(chunk)
                 return
             except Exception as exc:
                 if attempt == self.max_retries - 1:
-                    raise RuntimeError(f"Stream download failed after {self.max_retries} attempts: {exc}") from exc
+                    raise RuntimeError(
+                        f"Stream download failed after {self.max_retries} attempts: {exc}"
+                    ) from exc
                 time.sleep(2 * (attempt + 1))
 
 

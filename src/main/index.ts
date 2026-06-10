@@ -1,8 +1,8 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog, nativeTheme } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { execFileSync, spawn, type ChildProcess } from 'child_process'
-import { copyFileSync, cpSync, existsSync, readdirSync, rmSync, statSync } from 'fs'
+import { copyFileSync, cpSync, existsSync, readdirSync, rmSync, statSync, readFileSync, writeFileSync } from 'fs'
 import { createServer } from 'net'
 import { getAppDataPaths, sidecarEnv, type AppDataPaths } from './appPaths'
 
@@ -10,6 +10,7 @@ let mainWindow: BrowserWindow | null = null
 let sidecarProcess: ChildProcess | null = null
 let appPaths: AppDataPaths | null = null
 let isQuitting = false
+let sigkillTimer: ReturnType<typeof setTimeout> | null = null
 
 // Must match SIDECAR_PORT in content_understand/defaults.py
 const SIDECAR_PORT = 17890
@@ -25,10 +26,13 @@ if (!gotLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    // Focus the existing window when a second instance is launched
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.focus()
+      }
+    } catch {
+      mainWindow = null
     }
   })
 }
@@ -128,8 +132,18 @@ function resolveSidecarCommand(): { cmd: string; args: string[]; cwd: string } |
   const root = join(__dirname, '../..')
   const serverPy = join(root, 'sidecar', 'server.py')
   if (!existsSync(serverPy)) return null
+
+  let pythonCmd = process.platform === 'win32' ? 'python' : 'python3'
+  const venvPythonWin = join(root, '.venv', 'Scripts', 'python.exe')
+  const venvPythonUnix = join(root, '.venv', 'bin', 'python')
+  if (process.platform === 'win32' && existsSync(venvPythonWin)) {
+    pythonCmd = venvPythonWin
+  } else if (process.platform !== 'win32' && existsSync(venvPythonUnix)) {
+    pythonCmd = venvPythonUnix
+  }
+
   return {
-    cmd: process.platform === 'win32' ? 'python' : 'python3',
+    cmd: pythonCmd,
     args: [serverPy, '--port', String(SIDECAR_PORT)],
     cwd: root
   }
@@ -206,6 +220,12 @@ async function waitForHealth(timeoutMs: number): Promise<boolean> {
 async function stopSidecar(): Promise<void> {
   if (!sidecarProcess) return
 
+  // Clear any pending SIGKILL timer from a previous stopSidecar call
+  if (sigkillTimer) {
+    clearTimeout(sigkillTimer)
+    sigkillTimer = null
+  }
+
   const proc = sidecarProcess
   sidecarProcess = null
 
@@ -230,11 +250,17 @@ async function stopSidecar(): Promise<void> {
   } else {
     // Unix: SIGTERM gives sidecar a chance to run atexit cleanup
     proc.kill('SIGTERM')
-    setTimeout(() => {
-      if (proc.exitCode === null && !proc.killed) {
-        try { proc.kill('SIGKILL') } catch { /* already dead */ }
-      }
-    }, 5000)
+    // Poll for exit every 500ms, up to 8 seconds
+    for (let i = 0; i < 16; i++) {
+      await sleep(500)
+      if (proc.exitCode !== null) break
+    }
+    // If still alive after 8s, force kill
+    if (proc.exitCode === null && !proc.killed) {
+      try { proc.kill('SIGKILL') } catch { /* already dead */ }
+    }
+    // Give OS 2s to fully release the child
+    await sleep(2000)
   }
 }
 
@@ -246,10 +272,44 @@ function vaultRoot(): string {
   return appPaths?.vault ?? getAppDataPaths().vault
 }
 
+interface WindowState {
+  width: number
+  height: number
+  x?: number
+  y?: number
+  isMaximized?: boolean
+}
+
+function getWindowStatePath(): string {
+  const ad = appPaths?.appData ?? getAppDataPaths().appData
+  return join(ad, 'window-state.json')
+}
+
+function loadWindowState(): WindowState {
+  try {
+    const p = getWindowStatePath()
+    if (existsSync(p)) {
+      return JSON.parse(readFileSync(p, 'utf8'))
+    }
+  } catch { /* ignore */ }
+  return { width: 1280, height: 820 }
+}
+
+function saveWindowState(state: WindowState): void {
+  try {
+    const p = getWindowStatePath()
+    writeFileSync(p, JSON.stringify(state), 'utf8')
+  } catch { /* ignore */ }
+}
+
 function createWindow(): void {
+  let windowState = loadWindowState()
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: windowState.width,
+    height: windowState.height,
+    x: windowState.x,
+    y: windowState.y,
     minWidth: 960,
     minHeight: 640,
     show: false,
@@ -263,6 +323,29 @@ function createWindow(): void {
       nodeIntegration: false
     }
   })
+
+  if (windowState.isMaximized) {
+    mainWindow.maximize()
+  }
+
+  const saveState = () => {
+    if (!mainWindow) return
+    if (!mainWindow.isMaximized() && !mainWindow.isMinimized()) {
+      const bounds = mainWindow.getBounds()
+      windowState = {
+        width: bounds.width,
+        height: bounds.height,
+        x: bounds.x,
+        y: bounds.y
+      }
+    }
+    windowState.isMaximized = mainWindow.isMaximized()
+    saveWindowState(windowState)
+  }
+
+  mainWindow.on('resize', saveState)
+  mainWindow.on('move', saveState)
+  mainWindow.on('close', saveState)
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
@@ -297,6 +380,10 @@ if (gotLock) {
 
     ipcMain.handle('app:getSidecarBase', () => SIDECAR_BASE)
     ipcMain.handle('app:getPaths', () => appPaths ?? getAppDataPaths())
+
+    ipcMain.handle('app:setTheme', (_, theme: 'light' | 'dark' | 'system') => {
+      nativeTheme.themeSource = theme
+    })
 
     ipcMain.handle('shell:openPath', async (_, filePath: string) => shell.openPath(filePath))
 
@@ -334,7 +421,7 @@ if (gotLock) {
     // Delete all data and quit
     ipcMain.handle('app:deleteAllData', async () => {
       const paths = appPaths ?? getAppDataPaths()
-      const result = await dialog.showMessageBox(mainWindow!, {
+      const result = await dialog.showMessageBox(mainWindow as BrowserWindow, {
         type: 'warning',
         buttons: ['Delete All & Quit', 'Cancel'],
         defaultId: 1,
@@ -352,7 +439,7 @@ if (gotLock) {
     ipcMain.handle('vault:exportNote', async (_, relPath: string) => {
       const src = join(vaultRoot(), relPath)
       if (!existsSync(src)) return { ok: false, error: 'not_found' }
-      const result = await dialog.showSaveDialog(mainWindow!, {
+      const result = await dialog.showSaveDialog(mainWindow as BrowserWindow, {
         defaultPath: relPath.split('/').pop() ?? 'note.md',
         filters: [{ name: 'Markdown', extensions: ['md'] }]
       })
@@ -362,7 +449,7 @@ if (gotLock) {
     })
 
     ipcMain.handle('vault:exportAll', async () => {
-      const result = await dialog.showOpenDialog(mainWindow!, {
+      const result = await dialog.showOpenDialog(mainWindow as BrowserWindow, {
         properties: ['openDirectory', 'createDirectory'],
         title: 'Export wiki folder'
       })
@@ -376,8 +463,10 @@ if (gotLock) {
 
     app.on('activate', async () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        // macOS dock click: re-create window AND restart sidecar
-        await startSidecar()
+        // macOS dock click: re-create window; only restart sidecar if it died
+        if (!sidecarProcess) {
+          await startSidecar()
+        }
         createWindow()
       }
     })
@@ -386,36 +475,36 @@ if (gotLock) {
   // --- Graceful Shutdown Chain ---
 
   app.on('window-all-closed', () => {
-    if (process.platform === 'darwin') {
-      // macOS: keep app alive but free sidecar resources
-      stopSidecar()
-    } else {
-      // Windows/Linux: full quit
-      stopSidecar()
+    if (process.platform !== 'darwin') {
       app.quit()
     }
   })
 
-  app.on('before-quit', () => {
-    isQuitting = true
-    stopSidecar()
+  app.on('before-quit', async (e) => {
+    if (!isQuitting) {
+      e.preventDefault()
+      isQuitting = true
+      try {
+        await stopSidecar()
+      } catch (err) {
+        console.error('[main] stopSidecar failed:', err)
+      }
+      app.quit()
+    }
   })
 
-  app.on('will-quit', () => {
-    // Backup — stopSidecar is idempotent, safe to call again
-    stopSidecar()
-  })
+  // will-quit: synchronous-only. before-quit already handled async cleanup.
+  // If sidecar is still alive here, it will be orphaned and cleaned up on next launch.
 }
 
 // OS signal handlers (covers unexpected termination, e.g. `kill`, Ctrl+C)
-process.on('SIGTERM', () => {
-  console.log('[main] SIGTERM received')
-  stopSidecar()
-  app.quit()
-})
+const handleSignal = (sig: string): void => {
+  console.log(`[main] ${sig} received`)
+  if (!isQuitting) {
+    isQuitting = true
+    stopSidecar().catch(console.error).finally(() => process.exit(0))
+  }
+}
 
-process.on('SIGINT', () => {
-  console.log('[main] SIGINT received')
-  stopSidecar()
-  app.quit()
-})
+process.on('SIGTERM', () => handleSignal('SIGTERM'))
+process.on('SIGINT', () => handleSignal('SIGINT'))

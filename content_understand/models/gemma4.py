@@ -15,6 +15,7 @@ Video processing strategy:
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -48,9 +49,13 @@ _DEFAULT_MAX_CONCURRENT = 1  # Safe default — Ollama on most machines can't ha
 def _get_duration(path: str) -> float | None:
     try:
         cmd = [
-            "ffprobe", "-v", "quiet",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -80,12 +85,18 @@ def _split_video(video_path: str, segment_sec: int = _SEGMENT_SECONDS) -> list[d
         seg_path = os.path.join(tmpdir, f"seg_{idx:04d}.mp4")
 
         cmd = [
-            "ffmpeg", "-y",
-            "-i", video_path,
-            "-ss", str(start),
-            "-t", str(end - start),
-            "-c", "copy",
-            "-avoid_negative_ts", "make_zero",
+            "ffmpeg",
+            "-y",
+            "-i",
+            video_path,
+            "-ss",
+            str(start),
+            "-t",
+            str(end - start),
+            "-c",
+            "copy",
+            "-avoid_negative_ts",
+            "make_zero",
             seg_path,
         ]
 
@@ -94,8 +105,9 @@ def _split_video(video_path: str, segment_sec: int = _SEGMENT_SECONDS) -> list[d
             if result.returncode == 0 and os.path.exists(seg_path):
                 segments.append({"path": seg_path, "start": start, "end": end, "index": idx})
             else:
-                logger.warning("Segment %d split failed: %s", idx,
-                               result.stderr.decode(errors="replace")[:200])
+                logger.warning(
+                    "Segment %d split failed: %s", idx, result.stderr.decode(errors="replace")[:200]
+                )
         except Exception as e:
             logger.warning("Segment %d split error: %s", idx, e)
 
@@ -116,10 +128,14 @@ def _extract_segment_materials(seg_path: str, tmpdir: str) -> tuple[list[str], s
 
     # Extract frames at 1/3fps (10 frames per 30s segment)
     frame_cmd = [
-        "ffmpeg", "-y",
-        "-i", seg_path,
-        "-vf", f"fps={_DEFAULT_FPS}",
-        "-q:v", "5",
+        "ffmpeg",
+        "-y",
+        "-i",
+        seg_path,
+        "-vf",
+        f"fps={_DEFAULT_FPS}",
+        "-q:v",
+        "5",
         os.path.join(frames_dir, "f_%04d.jpg"),
     ]
 
@@ -136,12 +152,17 @@ def _extract_segment_materials(seg_path: str, tmpdir: str) -> tuple[list[str], s
     # Extract audio as WAV (16kHz mono)
     audio_path = os.path.join(tmpdir, "audio.wav")
     audio_cmd = [
-        "ffmpeg", "-y",
-        "-i", seg_path,
+        "ffmpeg",
+        "-y",
+        "-i",
+        seg_path,
         "-vn",
-        "-acodec", "pcm_s16le",
-        "-ar", "16000",
-        "-ac", "1",
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
         audio_path,
     ]
 
@@ -161,10 +182,8 @@ def _cleanup_segments(segments: list[dict]) -> None:
     for seg in segments:
         p = Path(seg["path"])
         if p.exists() and "cu_seg_" in str(p):
-            try:
+            with contextlib.suppress(OSError):
                 p.unlink()
-            except OSError:
-                pass
             try:
                 parent = p.parent
                 if parent.exists() and not any(parent.iterdir()):
@@ -319,13 +338,21 @@ class Gemma4Model(ContentModel):
         json_schema: dict | None = None,
     ) -> str | dict:
         if bundle.content_type == "video":
-            return self._understand_video(bundle, prompt, timeout, language, output_format, json_schema)
+            return self._understand_video(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
         elif bundle.content_type == "audio":
-            return self._understand_audio(bundle, prompt, timeout, language, output_format, json_schema)
+            return self._understand_audio(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
         elif bundle.content_type == "image":
-            return self._understand_image(bundle, prompt, timeout, language, output_format, json_schema)
+            return self._understand_image(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
         else:
-            return self._understand_text(bundle, prompt, timeout, language, output_format, json_schema)
+            return self._understand_text(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
 
     # ── Video: split → batch → merge ─────────────────────────────
 
@@ -349,12 +376,19 @@ class Gemma4Model(ContentModel):
         if duration <= self.segment_seconds + 2:
             logger.info("Short video (%.0fs), single pass", duration)
             return self._understand_single_segment(
-                video_path, prompt, timeout, lang, output_format, json_schema,
+                video_path,
+                prompt,
+                timeout,
+                lang,
+                output_format,
+                json_schema,
                 time_range=f"00:00-{_mmss(duration)}",
             )
 
         # Long video — split → batch → global summarize
-        logger.info("Long video (%.0fs), splitting into %ds segments", duration, self.segment_seconds)
+        logger.info(
+            "Long video (%.0fs), splitting into %ds segments", duration, self.segment_seconds
+        )
         segments = _split_video(video_path, self.segment_seconds)
         if not segments:
             raise RuntimeError("Failed to split video")
@@ -367,7 +401,12 @@ class Gemma4Model(ContentModel):
 
         try:
             return self._understand_segmented_video(
-                segments, prompt, timeout, lang, output_format, json_schema,
+                segments,
+                prompt,
+                timeout,
+                lang,
+                output_format,
+                json_schema,
                 metadata=metadata,
             )
         finally:
@@ -392,17 +431,21 @@ class Gemma4Model(ContentModel):
 
             # Add frames as images (Ollama images array format)
             for b64 in frames_b64:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                })
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                    }
+                )
 
             # Add audio if available (Ollama accepts WAV in images array)
             if audio_b64:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:audio/wav;base64,{audio_b64}"},
-                })
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:audio/wav;base64,{audio_b64}"},
+                    }
+                )
 
             # Prompt
             effective_prompt = prompt or self._build_segment_prompt(time_range, language)
@@ -433,8 +476,12 @@ class Gemma4Model(ContentModel):
             time_range = f"{_mmss(seg['start'])}-{_mmss(seg['end'])}"
             try:
                 result = self._understand_single_segment(
-                    seg["path"], prompt, timeout, language,
-                    output_format="json", json_schema=None,
+                    seg["path"],
+                    prompt,
+                    timeout,
+                    language,
+                    output_format="json",
+                    json_schema=None,
                     time_range=time_range,
                 )
                 if isinstance(result, str):
@@ -450,10 +497,7 @@ class Gemma4Model(ContentModel):
                 return idx, None
 
         with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
-            futures = {
-                executor.submit(process_segment, seg): seg
-                for seg in segments
-            }
+            futures = {executor.submit(process_segment, seg): seg for seg in segments}
             for future in as_completed(futures):
                 idx, result = future.result()
                 segment_results[idx] = result
@@ -489,9 +533,16 @@ class Gemma4Model(ContentModel):
 
         # Build segments context for the summary prompt
         segments_json = json.dumps(
-            [{"time_range": r.get("_time_range", ""), "timeline": r.get("timeline", ""),
-              "key_points": r.get("key_points", [])} for r in results],
-            ensure_ascii=False, indent=2,
+            [
+                {
+                    "time_range": r.get("_time_range", ""),
+                    "timeline": r.get("timeline", ""),
+                    "key_points": r.get("key_points", []),
+                }
+                for r in results
+            ],
+            ensure_ascii=False,
+            indent=2,
         )
 
         title = metadata.get("title", "Untitled")
@@ -501,11 +552,17 @@ class Gemma4Model(ContentModel):
         # Pick prompt based on language
         if language == "en":
             prompt = _WIKI_SUMMARY_PROMPT_EN.format(
-                title=title, url=url, duration=duration, segments_json=segments_json,
+                title=title,
+                url=url,
+                duration=duration,
+                segments_json=segments_json,
             )
         else:
             prompt = _WIKI_SUMMARY_PROMPT_ZH.format(
-                title=title, url=url, duration=duration, segments_json=segments_json,
+                title=title,
+                url=url,
+                duration=duration,
+                segments_json=segments_json,
             )
 
         logger.info("Global summarize: %d segments → wiki page", len(results))
@@ -539,7 +596,12 @@ class Gemma4Model(ContentModel):
         # Short audio — single pass
         if duration <= self.segment_seconds + 2:
             return self._understand_single_audio(
-                audio_path, prompt, timeout, language, output_format, json_schema,
+                audio_path,
+                prompt,
+                timeout,
+                language,
+                output_format,
+                json_schema,
             )
 
         # Long audio — split and process
@@ -552,7 +614,12 @@ class Gemma4Model(ContentModel):
             for seg in segments:
                 try:
                     r = self._understand_single_audio(
-                        seg["path"], prompt, timeout, language, "text", None,
+                        seg["path"],
+                        prompt,
+                        timeout,
+                        language,
+                        "text",
+                        None,
                     )
                     results.append(r)
                 except Exception as e:
@@ -580,10 +647,17 @@ class Gemma4Model(ContentModel):
         wav_path = os.path.join(tmpdir, "audio.wav")
         try:
             cmd = [
-                "ffmpeg", "-y",
-                "-i", audio_path,
-                "-vn", "-acodec", "pcm_s16le",
-                "-ar", "16000", "-ac", "1",
+                "ffmpeg",
+                "-y",
+                "-i",
+                audio_path,
+                "-vn",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
                 wav_path,
             ]
             subprocess.run(cmd, capture_output=True, timeout=60)
@@ -615,12 +689,16 @@ class Gemma4Model(ContentModel):
 
         for img_path in bundle.images:
             b64 = base64.b64encode(Path(img_path).read_bytes()).decode()
-            content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-            })
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                }
+            )
 
-        content.append({"type": "text", "text": prompt or self._build_default_prompt("image", language)})
+        content.append(
+            {"type": "text", "text": prompt or self._build_default_prompt("image", language)}
+        )
         return self._chat(content, timeout, output_format, json_schema)
 
     def _understand_text(
@@ -642,7 +720,13 @@ class Gemma4Model(ContentModel):
 
     # ── Chat API ─────────────────────────────────────────────────
 
-    def _chat(self, content: list[dict], timeout: int, output_format: str = "text", json_schema: dict | None = None) -> str | dict:
+    def _chat(
+        self,
+        content: list[dict],
+        timeout: int,
+        output_format: str = "text",
+        json_schema: dict | None = None,
+    ) -> str | dict:
         import requests
 
         url = f"{self.api_base}{_OLLAMA_CHAT}"
@@ -736,4 +820,6 @@ class Gemma4Model(ContentModel):
             },
         }
         lang = language or "zh"
-        return defaults.get(content_type, {}).get(lang, defaults.get(content_type, {}).get("zh", ""))
+        return defaults.get(content_type, {}).get(
+            lang, defaults.get(content_type, {}).get("zh", "")
+        )

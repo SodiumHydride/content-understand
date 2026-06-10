@@ -81,9 +81,7 @@ class OpenAICompatAudioModel(AudioModel):
         ]
         proc = subprocess.run(cmd, capture_output=True, timeout=120)
         if proc.returncode != 0:
-            raise RuntimeError(
-                "ffmpeg audio conversion failed. Install ffmpeg for local audio."
-            )
+            raise RuntimeError("ffmpeg audio conversion failed. Install ffmpeg for local audio.")
         return out
 
     def _transcribe_with_model(self, wav_path: str, timeout: int) -> str:

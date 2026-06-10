@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import logging
 import os
 import shutil
@@ -38,15 +39,32 @@ class FFmpegPreprocessor(Preprocessor):
 
         try:
             cmd = [
-                "ffmpeg", "-y", "-i", input_path,
-                "-c:v", "libx264", "-profile:v", "baseline", "-level", "3.0",
-                "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", cfg.audio_bitrate,
-                "-movflags", "+faststart",
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+                "-c:v",
+                "libx264",
+                "-profile:v",
+                "baseline",
+                "-level",
+                "3.0",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                cfg.audio_bitrate,
+                "-movflags",
+                "+faststart",
                 output_path,
             ]
             result = subprocess.run(cmd, capture_output=True, timeout=cfg.normalize_timeout)
-            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            if (
+                result.returncode == 0
+                and os.path.exists(output_path)
+                and os.path.getsize(output_path) > 0
+            ):
                 return output_path
             self._safe_unlink(output_path)
             return None
@@ -64,17 +82,33 @@ class FFmpegPreprocessor(Preprocessor):
 
         try:
             cmd = [
-                "ffmpeg", "-y", "-i", input_path,
-                "-c:v", "libx264", "-crf", str(crf), "-preset", cfg.preset,
-                "-c:a", "aac", "-b:a", cfg.audio_bitrate,
-                "-movflags", "+faststart",
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+                "-c:v",
+                "libx264",
+                "-crf",
+                str(crf),
+                "-preset",
+                cfg.preset,
+                "-c:a",
+                "aac",
+                "-b:a",
+                cfg.audio_bitrate,
+                "-movflags",
+                "+faststart",
             ]
             if scale:
                 cmd.extend(["-vf", f"scale={scale}"])
             cmd.append(output_path)
 
             result = subprocess.run(cmd, capture_output=True, timeout=cfg.compress_timeout)
-            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            if (
+                result.returncode == 0
+                and os.path.exists(output_path)
+                and os.path.getsize(output_path) > 0
+            ):
                 orig_size = os.path.getsize(input_path)
                 new_size = os.path.getsize(output_path)
                 ratio = new_size / orig_size if orig_size > 0 else 1.0
@@ -109,13 +143,24 @@ class FFmpegPreprocessor(Preprocessor):
         output_path = input_path + ".trimmed.mp4"
         try:
             cmd = [
-                "ffmpeg", "-y", "-i", input_path,
-                "-t", str(seconds), "-c", "copy",
-                "-movflags", "+faststart",
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+                "-t",
+                str(seconds),
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
                 output_path,
             ]
             result = subprocess.run(cmd, capture_output=True, timeout=self.config.trim_timeout)
-            if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            if (
+                result.returncode == 0
+                and os.path.exists(output_path)
+                and os.path.getsize(output_path) > 0
+            ):
                 return output_path
             self._safe_unlink(output_path)
             return None
@@ -127,9 +172,13 @@ class FFmpegPreprocessor(Preprocessor):
     def get_duration(self, path: str) -> int | None:
         try:
             cmd = [
-                "ffprobe", "-v", "quiet",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
                 path,
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
@@ -160,7 +209,9 @@ class FFmpegPreprocessor(Preprocessor):
             # the encoded form will exceed hard_limit. Compress first.
             raw_limit = int(hard_limit * 0.75)
             if size > raw_limit:
-                logger.info("File %d bytes exceeds raw limit %d, compressing first", size, raw_limit)
+                logger.info(
+                    "File %d bytes exceeds raw limit %d, compressing first", size, raw_limit
+                )
                 compressed_path = self.compress_chain(normalized_path)
                 if compressed_path:
                     if normalized_path != path:
@@ -169,7 +220,10 @@ class FFmpegPreprocessor(Preprocessor):
                     compressed_path = None
                     size = os.path.getsize(normalized_path)
                 else:
-                    logger.warning("Compression failed for oversized file (%d bytes), cannot base64 encode", size)
+                    logger.warning(
+                        "Compression failed for oversized file (%d bytes), cannot base64 encode",
+                        size,
+                    )
                     return None
 
             with open(normalized_path, "rb") as f:
@@ -214,7 +268,5 @@ class FFmpegPreprocessor(Preprocessor):
     @staticmethod
     def _safe_unlink(path: str | None) -> None:
         if path and os.path.exists(path):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(path)
-            except OSError:
-                pass

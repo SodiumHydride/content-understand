@@ -164,8 +164,7 @@ class ModelCapabilities:
         # Video content — the interesting part
         if bundle.content_type == "video":
             # Best case: model can handle video+audio natively
-            if (self.accepts & Modality.VIDEO_WITH_AUDIO
-                    and self.supports_native_video):
+            if self.accepts & Modality.VIDEO_WITH_AUDIO and self.supports_native_video:
                 return InputStrategy.NATIVE_VIDEO_AUDIO
 
             # Model can handle video natively but not audio
@@ -207,5 +206,3 @@ class InputStrategy(Enum):
 
     # Fallback strategies
     TRANSCRIBE_THEN_TEXT = "transcribe_then_text"  # Audio → transcript → text model
-
-

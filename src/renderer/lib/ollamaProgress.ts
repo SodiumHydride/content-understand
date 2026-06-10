@@ -72,9 +72,10 @@ function formatMetrics(
   }
 }
 
-export function presetLabel(presets: RuntimePreset[], presetId: string, isZh: boolean): string {
+export function presetLabel(presets: RuntimePreset[], presetId: string, lang?: string): string {
   const preset = presets.find((p) => (p.preset_id ?? p.id) === presetId)
   if (!preset) return presetId
+  const isZh = lang?.startsWith('zh') ?? true
   return isZh ? preset.label_zh : preset.label_en
 }
 
@@ -108,7 +109,7 @@ function optimisticOperationView(
 export function deriveOperationProgress(
   catalog: OllamaCatalog | null,
   presets: RuntimePreset[],
-  isZh: boolean,
+  t: (key: string, opts?: Record<string, unknown>) => string,
   task?: Task | null
 ): OperationProgressView | null {
   const taskMetrics = task
@@ -133,7 +134,7 @@ export function deriveOperationProgress(
     const formatted = formatMetrics(metrics)
     return {
       kind: 'download',
-      label: isZh ? '正在下载应用内 Ollama' : 'Downloading app Ollama',
+      label: t('ollama.downloadingAppOllamaProgress'),
       presetId: undefined,
       ...formatted
     }
@@ -145,7 +146,7 @@ export function deriveOperationProgress(
       presets.find((p) => (p.preset_id ?? p.id) === presetId)?.ollama_model ?? presetId
     const metrics = metricsFromProgress(op.progress, taskMetrics)
     const formatted = formatMetrics(metrics)
-    const pullLabel = isZh ? `正在拉取 ${model}` : `Pulling ${model}`
+    const pullLabel = t('ollama.pulling', { model })
     return {
       kind: 'pull',
       label: task?.label?.trim() || pullLabel,
@@ -159,7 +160,7 @@ export function deriveOperationProgress(
     const formatted = formatMetrics(metrics)
     return {
       kind: 'setup',
-      label: isZh ? '正在配置本地运行时' : 'Setting up local runtime',
+      label: t('ollama.settingUpRuntime'),
       presetId: undefined,
       ...formatted
     }

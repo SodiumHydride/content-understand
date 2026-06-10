@@ -40,11 +40,13 @@ ProgressFn = Callable[[str, int, str], None]
 def _encode_file_base64(path: str) -> str | None:
     """Encode a file to base64 string."""
     import base64
+
     try:
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode()
     except Exception:
         return None
+
 
 _DEFAULT_PROMPTS: dict[str, dict[str, str]] = {
     "video": {
@@ -169,6 +171,47 @@ def _extract_tags(text: str) -> list[str]:
             seen.add(tag.lower())
             result.append(tag)
     return result
+
+
+def _split_transcript_at_boundaries(text: str, n_chunks: int) -> list[str]:
+    """Split transcript into roughly equal chunks at sentence boundaries."""
+    if not text or n_chunks <= 1:
+        return [text] if text else [""]
+
+    # Find all sentence boundary positions (Chinese + English)
+    boundaries = [0]
+    for m in re.finditer(r'[。！？.!?\n]', text):
+        boundaries.append(m.end())
+    if boundaries[-1] != len(text):
+        boundaries.append(len(text))
+
+    # Remove duplicates and sort
+    boundaries = sorted(set(boundaries))
+
+    if len(boundaries) <= n_chunks:
+        # Fewer boundaries than chunks — just return as-is
+        chunk_len = len(text) // n_chunks
+        segments = []
+        for i in range(n_chunks):
+            start = i * chunk_len
+            end = (i + 1) * chunk_len if i < n_chunks - 1 else len(text)
+            segments.append(text[start:end])
+        return segments
+
+    target_len = len(text) // n_chunks
+    segments = []
+    prev = 0
+    for i in range(n_chunks - 1):
+        target_pos = (i + 1) * target_len
+        # Find nearest boundary to target position
+        best = min(boundaries, key=lambda b: abs(b - target_pos))
+        if best <= prev:
+            remaining = [b for b in boundaries if b > prev]
+            best = min(remaining) if remaining else len(text)
+        segments.append(text[prev:best])
+        prev = best
+    segments.append(text[prev:])
+    return segments
 
 
 class ContentPipeline:
@@ -341,42 +384,56 @@ class ContentPipeline:
         if has_content_model(backend_name):
             try:
                 return self._understand_with_content_model(
-                    resolve_result, content_type, backend_name, backend_config,
-                    effective_prompt, on_progress, lang,
+                    resolve_result,
+                    content_type,
+                    backend_name,
+                    backend_config,
+                    effective_prompt,
+                    on_progress,
+                    lang,
                     output_format=output_format,
                 )
             except Exception as exc:
                 logger.warning(
                     "ContentModel '%s' failed for %s (%s), falling back to legacy",
-                    backend_name, content_type, exc,
+                    backend_name,
+                    content_type,
+                    exc,
                 )
 
         # Legacy per-modality path
         try:
             if content_type == "video":
                 return self._understand_video(
-                    local_path, backend_name, backend_config, effective_prompt, on_progress, lang,
+                    local_path,
+                    backend_name,
+                    backend_config,
+                    effective_prompt,
+                    on_progress,
+                    lang,
                     resolve_result=resolve_result,
                 )
             elif content_type == "image":
                 return self._understand_image(
-                    local_path, backend_name, backend_config, effective_prompt, lang
+                    local_path, backend_name, backend_config, effective_prompt, on_progress, lang
                 )
             elif content_type == "audio":
                 return self._understand_audio(
-                    local_path, backend_name, backend_config, effective_prompt, lang
+                    local_path, backend_name, backend_config, effective_prompt, on_progress, lang
                 )
             else:  # article
                 return self._understand_article(
-                    local_path, resolve_result, backend_name, backend_config, effective_prompt, lang
+                    local_path, resolve_result, backend_name, backend_config, effective_prompt, on_progress, lang
                 )
         except (NotImplementedError, ValueError, ConnectionError, TimeoutError, OSError) as exc:
             logger.warning(
                 "Backend '%s' doesn't support %s (%s), falling back to article",
-                backend_name, content_type, exc,
+                backend_name,
+                content_type,
+                exc,
             )
             return self._understand_article(
-                local_path, resolve_result, backend_name, backend_config, effective_prompt, lang
+                local_path, resolve_result, backend_name, backend_config, effective_prompt, on_progress, lang
             )
 
     def _understand_with_content_model(
@@ -413,7 +470,9 @@ class ContentPipeline:
             fps=extra.get("fps", caps.default_fps),
             max_frames=extra.get("max_frames", 500 if content_type == "video" else 30),
             scale=extra.get("scale", caps.default_scale),
-            strategy=extra.get("frame_strategy", "scene_aware" if content_type == "video" else "uniform"),
+            strategy=extra.get(
+                "frame_strategy", "scene_aware" if content_type == "video" else "uniform"
+            ),
         )
 
         # Prepare content bundle with capability-aware preprocessing
@@ -443,16 +502,27 @@ class ContentPipeline:
 
         # Map-Reduce: chunked video understanding for long videos
         # Skip if model handles segmentation internally (e.g. Gemma4)
-        caps = model.capabilities() if hasattr(model, 'capabilities') else None
+        caps = model.capabilities() if hasattr(model, "capabilities") else None
         model_handles_own_segments = caps and caps.supports_native_video
-        if (content_type == "video"
-                and bundle.audio_chunks
-                and len(bundle.audio_chunks) > 1
-                and not model_handles_own_segments):
+        if (
+            content_type == "video"
+            and bundle.audio_chunks
+            and len(bundle.audio_chunks) > 1
+            and not model_handles_own_segments
+        ):
             return self._understand_video_chunked(
-                model, bundle, effective_prompt, backend_config,
-                on_progress, language, output_format, json_schema,
+                model,
+                bundle,
+                effective_prompt,
+                backend_config,
+                on_progress,
+                language,
+                output_format,
+                json_schema,
             )
+
+        if on_progress:
+            on_progress("model", 55, f"Calling {backend_name} for understanding...")
 
         try:
             summary = model.understand(
@@ -467,6 +537,9 @@ class ContentPipeline:
         finally:
             # Clean up temporary preprocessed files
             preprocessor.cleanup_bundle(bundle)
+
+        if on_progress:
+            on_progress("model", 90, "Model analysis complete")
 
         # Validate structured output
         if output_format == "json" and isinstance(summary, str):
@@ -514,20 +587,15 @@ class ContentPipeline:
         # Split frames into groups per chunk based on timestamp
         def frames_for_chunk(chunk):
             return [
-                ft for ft in all_timestamps
+                ft
+                for ft in all_timestamps
                 if chunk.start_seconds <= ft.timestamp_seconds < chunk.end_seconds
             ]
 
         # Build per-chunk transcript segments
         full_transcript = bundle.text or ""
-        transcript_segments = []
         if full_transcript:
-            # Split transcript roughly by chunk count
-            chunk_len = len(full_transcript) // n_chunks
-            for i in range(n_chunks):
-                start = i * chunk_len
-                end = (i + 1) * chunk_len if i < n_chunks - 1 else len(full_transcript)
-                transcript_segments.append(full_transcript[start:end])
+            transcript_segments = _split_transcript_at_boundaries(full_transcript, n_chunks)
         else:
             transcript_segments = [""] * n_chunks
 
@@ -554,13 +622,17 @@ class ContentPipeline:
                 content.append({"type": "text", "text": f"[{ft.mmss}]"})
                 b64 = _encode_file_base64(str(ft.path))
                 if b64:
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                    })
+                    content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                        }
+                    )
 
             if chunk_transcript:
-                content.append({"type": "text", "text": f"[音频转录 {chunk.mmss_range}]\n{chunk_transcript}"})
+                content.append(
+                    {"type": "text", "text": f"[音频转录 {chunk.mmss_range}]\n{chunk_transcript}"}
+                )
 
             content.append({"type": "text", "text": chunk_prompt})
 
@@ -573,10 +645,7 @@ class ContentPipeline:
                 return idx, None
 
         with ThreadPoolExecutor(max_workers=min(3, n_chunks)) as executor:
-            futures = [
-                executor.submit(process_chunk, i, chunk)
-                for i, chunk in enumerate(chunks)
-            ]
+            futures = [executor.submit(process_chunk, i, chunk) for i, chunk in enumerate(chunks)]
             for future in as_completed(futures):
                 idx, result = future.result()
                 chunk_results[idx] = result
@@ -620,7 +689,8 @@ class ContentPipeline:
             )
             if tl_match:
                 entries = [
-                    line.strip() for line in tl_match.group(1).strip().split("\n")
+                    line.strip()
+                    for line in tl_match.group(1).strip().split("\n")
                     if line.strip() and line.strip().startswith("-")
                 ]
                 all_timelines.extend(entries)
@@ -631,8 +701,14 @@ class ContentPipeline:
             )
             if scene_match:
                 entries = [
-                    line.strip() for line in scene_match.group(1).strip().split("\n")
-                    if line.strip() and (line.strip().startswith("-") or line.strip().startswith("*") or re_mod.match(r"^\d+\.", line.strip()))
+                    line.strip()
+                    for line in scene_match.group(1).strip().split("\n")
+                    if line.strip()
+                    and (
+                        line.strip().startswith("-")
+                        or line.strip().startswith("*")
+                        or re_mod.match(r"^\d+\.", line.strip())
+                    )
                 ]
                 all_scenes.extend(entries)
 
@@ -642,8 +718,14 @@ class ContentPipeline:
             )
             if points_match:
                 entries = [
-                    line.strip() for line in points_match.group(1).strip().split("\n")
-                    if line.strip() and (line.strip().startswith("-") or line.strip().startswith("*") or re_mod.match(r"^\d+\.", line.strip()))
+                    line.strip()
+                    for line in points_match.group(1).strip().split("\n")
+                    if line.strip()
+                    and (
+                        line.strip().startswith("-")
+                        or line.strip().startswith("*")
+                        or re_mod.match(r"^\d+\.", line.strip())
+                    )
                 ]
                 all_points.extend(entries)
 
@@ -749,6 +831,9 @@ class ContentPipeline:
             language=language,
         )
 
+        if on_progress:
+            on_progress("model", 90, "Video analysis complete")
+
         return {"summary": summary, "tags": _extract_tags(summary)}
 
     def _understand_image(
@@ -757,6 +842,7 @@ class ContentPipeline:
         backend_name: str,
         config,
         prompt: str,
+        on_progress: ProgressFn | None = None,
         language: str = "zh",
     ) -> dict[str, Any]:
         model = create_image_model(backend_name, config)
@@ -764,6 +850,9 @@ class ContentPipeline:
         image_url = None
         if model.supports_image_url() and path.startswith("http"):
             image_url = path
+
+        if on_progress:
+            on_progress("model", 50, f"Analyzing image with {backend_name}...")
 
         summary = model.understand_image(
             image_path=path if not image_url else None,
@@ -773,6 +862,9 @@ class ContentPipeline:
             language=language,
         )
 
+        if on_progress:
+            on_progress("model", 60, "Image analysis complete")
+
         return {"summary": summary, "tags": _extract_tags(summary)}
 
     def _understand_audio(
@@ -781,9 +873,13 @@ class ContentPipeline:
         backend_name: str,
         config,
         prompt: str,
+        on_progress: ProgressFn | None = None,
         language: str = "zh",
     ) -> dict[str, Any]:
         model = create_audio_model(backend_name, config)
+
+        if on_progress:
+            on_progress("model", 50, f"Analyzing audio with {backend_name}...")
 
         summary = model.understand_audio(
             audio_path=path,
@@ -791,6 +887,9 @@ class ContentPipeline:
             timeout=config.timeout,
             language=language,
         )
+
+        if on_progress:
+            on_progress("model", 60, "Audio analysis complete")
 
         return {"summary": summary, "tags": _extract_tags(summary)}
 
@@ -801,6 +900,7 @@ class ContentPipeline:
         backend_name: str,
         config,
         prompt: str,
+        on_progress: ProgressFn | None = None,
         language: str = "zh",
     ) -> dict[str, Any]:
         # Extract text from the content
@@ -808,6 +908,9 @@ class ContentPipeline:
         if not text:
             msg = "无法提取文本内容。" if language == "zh" else "Could not extract text content."
             return {"summary": msg, "tags": []}
+
+        if on_progress:
+            on_progress("model", 50, "Text extracted, preparing model...")
 
         model = create_article_model(backend_name, config)
 
@@ -817,6 +920,9 @@ class ContentPipeline:
         # Format template variables if prompt contains them
         if prompt and ("{text}" in prompt or "{title}" in prompt):
             prompt = prompt.format(title=title, url=url, text=text)
+
+        if on_progress:
+            on_progress("model", 60, f"Analyzing article with {backend_name}...")
 
         summary = model.understand_article(
             text=text,

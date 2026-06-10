@@ -114,10 +114,13 @@
       "thinking": "文字：点击输入 · 画笔/荧光：拖动绘制 · 图片：粘贴或 I 键 · 空格+拖平移",
       "wiki": "单击选中节点 · 双击阅读全文"
     },
+    "timeline": "时间轴筛选",
     "peek": {
       "read": "阅读全文",
       "hint": "双击阅读",
-      "dismiss": "取消选中"
+      "dismiss": "取消选中",
+      "focusLocal": "聚焦关联",
+      "unfocusLocal": "显示全部"
     },
     "menu": {
       "addTextHere": "在此输入文字",
@@ -159,11 +162,14 @@
     "failed": "失败",
     "empty": "还没有任务",
     "stage": {
+      "setup": "初始化",
       "resolve": "解析链接",
       "download": "下载内容",
       "model": "模型理解",
       "write": "写入笔记"
-    }
+    },
+    "complete": "已完成",
+    "dismiss": "关闭"
   },
   "library": {
     "empty": "便签架还是空的",
@@ -188,9 +194,16 @@
     "saving": "保存中...",
     "saved": "已保存",
     "saveFailed": "保存失败",
-    "cancel": "取消"
+    "unsaved": "未保存的更改",
+    "cancel": "取消",
+    "history": "历史",
+    "historyTitle": "版本历史",
+    "restore": "恢复此版本",
+    "noHistory": "无历史版本",
+    "viewingVersion": "正在预览历史版本："
   },
   "search": {
+    "notFound": "未找到",
     "noResults": "未找到结果",
     "wikilinkTitle": "搜索笔记链接",
     "wikilinkPlaceholder": "输入笔记标题…",
@@ -224,6 +237,10 @@
     "languageSystem": "跟随系统",
     "languageZh": "中文",
     "languageEn": "English",
+    "theme": "主题模式",
+    "themeSystem": "跟随系统",
+    "themeLight": "浅色模式",
+    "themeDark": "深色模式",
     "outputLanguage": "AI 输出语言",
     "promptTemplate": "自定义 Prompt（可选）",
     "promptTemplatePlaceholder": "留空使用默认 prompt，填写后将覆盖默认值",
@@ -285,7 +302,39 @@
     "typography": "排版",
     "fontFamily": "字体",
     "fontSize": "字号",
-    "lineHeight": "行高"
+    "lineHeight": "行高",
+    "fontSerif": "宋体/衬线",
+    "fontSans": "黑体/无衬线",
+    "fontMono": "等宽",
+    "cloudProviders": "云端 Provider",
+    "modalityRouter": "模态路由",
+    "videoProcessing": "视频处理",
+    "frameRate": "抽帧率 (FPS)",
+    "frameRateHint": "视频越快运动，FPS 越高。讲座类 0.5~1，运动类 2~5",
+    "maxFrames": "最大帧数",
+    "frameScale": "帧缩放",
+    "frameScaleOriginal": "原始分辨率",
+    "contextSize": "上下文大小 (num_ctx)",
+    "contextSizeHint": "Gemma4 支持 256K，但 16K 足够 30 秒视频。越大越慢。",
+    "audioExtraction": "音频分离",
+    "audioExtractionHint": "从视频中分离音频轨（供音频模型使用）",
+    "networkProxy": "网络与代理",
+    "httpProxy": "HTTP 代理",
+    "httpProxyPlaceholder": "留空使用系统代理，例: http://127.0.0.1:7890",
+    "githubMirror": "GitHub 下载镜像",
+    "githubMirrorPlaceholder": "留空直连，例: https://mirror.ghproxy.com/",
+    "githubMirrorHint": "Ollama 二进制下载加速。国内常用: mirror.ghproxy.com, ghfast.top",
+    "ollamaMirror": "Ollama 模型镜像",
+    "ollamaMirrorPlaceholder": "留空用官方源，例: https://mirror.ollama.com",
+    "ollamaMirrorHint": "模型拉取加速。Ollama 官方有国内镜像 mirror.ollama.com",
+    "cookiesPlaceholder": "Bilibili cookies 文件路径",
+    "cookiesExportSuccess": "导出成功",
+    "cookiesExportFailed": "导出失败",
+    "cookiesExporting": "导出中...",
+    "cookiesFromChrome": "从 Chrome 导出",
+    "cookiesFromSafari": "从 Safari 导出",
+    "cookiesFromFirefox": "从 Firefox 导出",
+    "cookiesHint": "需要在对应浏览器中登录 B 站。Cookies 仅保存在本地。"
   },
   "setup": {
     "localReady": "本地引擎已就绪",
@@ -327,7 +376,16 @@
     "noCatalogPresets": "暂无 preset 模型（请确认 sidecar 已连接）",
     "pull": "拉取",
     "deleteModel": "删除模型",
-    "installed": "已安装"
+    "installed": "已安装",
+    "pulling": "正在拉取 {{model}}",
+    "pullFailed": "拉取失败",
+    "anotherPullInProgress": "已有其他模型正在拉取，请等待完成后再试",
+    "modelReady": "模型已就绪",
+    "downloadingAppOllamaProgress": "正在下载应用内 Ollama",
+    "settingUpRuntime": "正在配置本地运行时",
+    "appOllamaReady": "应用内 Ollama 已就绪",
+    "operationFailed": "操作失败",
+    "pullComplete": "已安装 {{name}}"
   },
   "provider": {
     "custom": "自定义...",
@@ -337,6 +395,33 @@
     "localPullHint": "请先在上方 Ollama 面板拉取 preset 模型，拉取后会出现在这里。",
     "commaSeparated": "多个 key 用逗号分隔，自动轮换"
   },
+  "log": {
+    "filterLogs": "搜索日志…",
+    "autoScroll": "自动滚动",
+    "noLogs": "暂无日志",
+    "noMatchingLogs": "无匹配日志",
+    "entries": "条"
+  },
+  "task": {
+    "eta": "剩余",
+    "hideBackground": "隐藏（后台任务继续）",
+    "cancel": "取消",
+    "dismiss": "关闭",
+    "activeCount": "{{count}} 个进行中",
+    "completedCount": "{{count}} 个已完成"
+  },
+  "modalityRouter": {
+    "defaultProvider": "默认 Provider",
+    "perModalityOverrides": "按模态覆盖",
+    "default": "默认",
+    "video": "视频",
+    "image": "图片",
+    "audio": "音频",
+    "article": "文章"
+  },
+  "progress": {
+    "eta": "剩余 {{eta}}"
+  },
   "errors": {
     "invalidUrl": "请输入有效的链接或选择文件",
     "sidecarOffline": "引擎未连接，已使用演示数据",
@@ -344,5 +429,67 @@
     "failed": "理解失败",
     "engineOffline": "引擎未连接 — 请重启应用或确认 sidecar 正在运行。",
     "configSyncFailed": "设置同步失败。请检查 sidecar 是否正在运行。"
+  },
+  "qa": {
+    "tab": "问答助手",
+    "captureTab": "收录内容",
+    "placeholder": "向你的知识库提问...",
+    "send": "发送",
+    "sources": "参考来源",
+    "empty": "开始提问你的个人知识库",
+    "emptyHint": "AI 将检索你所有的笔记，并结合上下文给出带有引用的回答",
+    "loading": "AI 思考中..."
+  },
+  "review": {
+    "button": "每日回顾",
+    "title": "知识回顾",
+    "subtitle": "温故而知新。每天复习 5 篇笔记，强化记忆。",
+    "cardProgress": "进度: {{current}} / {{total}}",
+    "reveal": "点击翻转显示卡片",
+    "showBack": "显示要点",
+    "empty": "今日无复习任务",
+    "emptyHint": "你已经完成了所有的回顾，或者知识库中还没有足够的笔记。",
+    "forgot": "忘记 / 模糊",
+    "good": "记住 / 一般",
+    "easy": "熟练 / 简单",
+    "complete": "恭喜完成！",
+    "completeHint": "今天已复习 {{count}} 篇笔记。保持这个好习惯！",
+    "close": "关闭",
+    "openNote": "打开笔记详情"
+  },
+  "shortcuts": {
+    "title": "快捷键",
+    "help": "显示快捷键帮助",
+    "search": "搜索快捷键…",
+    "noMatches": "无匹配快捷键",
+    "scope": {
+      "global": "全局",
+      "map": "导图",
+      "editor": "编辑器",
+      "reader": "阅读器"
+    },
+    "commandPalette": "命令面板",
+    "newNote": "新建笔记",
+    "editToggle": "切换编辑模式",
+    "save": "保存",
+    "drawToggle": "切换绘图模式",
+    "settings": "打开设置",
+    "viewCapture": "切换到收录",
+    "viewVault": "切换到便签架",
+    "viewMap": "切换到导图",
+    "viewJournal": "切换到时间线",
+    "searchNotes": "搜索笔记",
+    "toggleSidebar": "切换侧边栏",
+    "startUnderstand": "开始理解",
+    "mapToolSelect": "选择工具",
+    "mapToolText": "文本工具",
+    "mapToolPen": "画笔工具",
+    "mapToolHighlighter": "荧光笔工具",
+    "mapToolEraser": "橡皮擦工具",
+    "mapToolImage": "图片工具",
+    "mapDelete": "删除选中",
+    "mapEscape": "取消 / 取消选择",
+    "readerEscape": "关闭阅读器",
+    "wikilinkSearch": "搜索笔记链接"
   }
 }

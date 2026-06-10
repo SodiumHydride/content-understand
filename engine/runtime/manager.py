@@ -21,12 +21,12 @@ from engine.runtime.ollama_catalog import (
     validate_preset_pull,
 )
 from engine.runtime.ollama_manager import (
+    app_download_state,
     detect_app_ollama,
     detect_user_ollama,
     download_ollama,
     find_app_binary,
     get_shared_daemon,
-    app_download_state,
     is_app_ollama_installed,
     remove_app_ollama,
     resolve_active_ollama,
@@ -61,12 +61,14 @@ class RuntimeManager:
         self.recommended_preset_id: str | None = None
         self._thread: threading.Thread | None = None
         self._pull_thread: threading.Thread | None = None
+        self._pull_stop_event = threading.Event()
         self._pulling_preset_id: str | None = None
         self._pull_start_ts: float = 0.0
         self._status_cache: dict[str, Any] | None = None
         self._status_cache_ts: float = 0
         self._status_cache_ttl: float = 15.0
         self._prefer_user_ollama: bool = True
+        self._ollama_mirror: str = ""
 
         # Health monitoring
         self._health_thread: threading.Thread | None = None
@@ -81,6 +83,10 @@ class RuntimeManager:
             self._modality_models = saved
         else:
             self._modality_models = {}
+
+    def set_ollama_mirror(self, mirror: str) -> None:
+        """Set the Ollama registry mirror URL (called from sidecar when config updates)."""
+        self._ollama_mirror = mirror or ""
 
     def _set_state(
         self,
@@ -334,10 +340,18 @@ class RuntimeManager:
             return
 
         # Unhealthy
-        logger.warning(
-            "Ollama unhealthy: process_alive=%s api_ok=%s source=%s",
-            process_alive, api_ok, source,
-        )
+        if not process_alive:
+            logger.warning(
+                "Ollama unhealthy: process exited (source=%s, base_url=%s)",
+                source,
+                base_url,
+            )
+        else:
+            logger.warning(
+                "Ollama unhealthy: API not responding (source=%s, base_url=%s, process_alive=True)",
+                source,
+                base_url,
+            )
 
         # Only attempt restart if we own the process
         if source != "app":
@@ -363,6 +377,8 @@ class RuntimeManager:
 
     def _do_restart(self) -> None:
         """Actual restart logic (must be called with _restart_lock held)."""
+        from engine.runtime.ollama_manager import OLLAMA_APP_PORT
+
         max_retries = 3
         backoff = 5.0
 
@@ -370,12 +386,15 @@ class RuntimeManager:
             if self._ollama_restart_count >= max_retries:
                 self._ollama_health = "error"
                 logger.error(
-                    "Ollama health: gave up after %d restart attempts", max_retries,
+                    "Ollama health: gave up after %d restart attempts",
+                    max_retries,
                 )
                 return
             self._ollama_health = "restarting"
 
-        for attempt in range(max_retries):
+        last_error: str = ""
+
+        for _attempt in range(max_retries):
             if self._health_stop_event.is_set():
                 return
 
@@ -384,30 +403,62 @@ class RuntimeManager:
                 current_count = self._ollama_restart_count
 
             logger.warning(
-                "Ollama restart attempt %d/%d", current_count, max_retries,
+                "Ollama restart attempt %d/%d",
+                current_count,
+                max_retries,
+            )
+            self._set_state(
+                state="restarting",
+                message=f"Restarting Ollama ({current_count}/{max_retries})...",
             )
 
             try:
                 daemon = get_shared_daemon()
                 runtime_dir = app_data_root() / "runtime"
-                base = daemon.start(runtime_dir, models_dir())
 
-                # Verify it actually came up
-                if ollama_is_running(base):
-                    with self._lock:
-                        self._ollama_health = "healthy"
-                        self._ollama_restart_count = 0
-                    self._set_state(
-                        local_base_url=base,
-                        ollama_source="app",
-                        state="ready",
-                        message="Ollama restarted successfully",
+                # Step 1: Stop old process and wait for port release
+                logger.info("Stopping old Ollama daemon and waiting for port %d", OLLAMA_APP_PORT)
+                if not daemon.stop_and_wait_port(OLLAMA_APP_PORT, timeout=15.0):
+                    raise RuntimeError(
+                        f"Port {OLLAMA_APP_PORT} still occupied after 15s — "
+                        "another process may be using it"
                     )
-                    self._invalidate_status_cache()
-                    logger.info("Ollama restarted successfully at %s", base)
-                    return
+
+                # Step 2: Start fresh
+                logger.info("Starting Ollama daemon on port %d", OLLAMA_APP_PORT)
+                base = daemon.start(runtime_dir, models_dir(), ollama_mirror=self._ollama_mirror)
+
+                # Step 3: Verify API is actually responsive
+                if not ollama_is_running(base):
+                    raise RuntimeError(f"Ollama process started but API not responding at {base}")
+
+                # Success
+                with self._lock:
+                    self._ollama_health = "healthy"
+                    self._ollama_restart_count = 0
+                self._set_state(
+                    local_base_url=base,
+                    ollama_source="app",
+                    state="ready",
+                    message="Ollama restarted successfully",
+                )
+                self._invalidate_status_cache()
+                logger.info("Ollama restarted successfully at %s", base)
+                return
+
             except Exception as exc:
-                logger.warning("Ollama restart attempt %d failed: %s", current_count, exc)
+                last_error = str(exc)
+                logger.warning(
+                    "Ollama restart attempt %d failed: %s",
+                    current_count,
+                    exc,
+                    exc_info=True,
+                )
+                # Surface error to user immediately (not just in logs)
+                self._set_state(
+                    state="restarting",
+                    message=f"Restart attempt {current_count}/{max_retries} failed: {last_error}",
+                )
 
             if self._health_stop_event.is_set():
                 return
@@ -417,15 +468,19 @@ class RuntimeManager:
 
             self._health_stop_event.wait(timeout=backoff)
 
-        # All retries exhausted
+        # All retries exhausted — surface the last error to the user
         with self._lock:
             self._ollama_health = "error"
         self._set_state(
             state="error",
-            message="Ollama died and restart failed after 3 attempts",
+            message=f"Ollama restart failed after {max_retries} attempts. Last error: {last_error}",
         )
         self._invalidate_status_cache()
-        logger.error("Ollama health: gave up after %d restart attempts", max_retries)
+        logger.error(
+            "Ollama health: gave up after %d restart attempts. Last error: %s",
+            max_retries,
+            last_error,
+        )
 
     def status(self) -> dict[str, Any]:
         now = _time_mod.monotonic()
@@ -444,8 +499,12 @@ class RuntimeManager:
             "selected_preset_id": self.selected_preset_id(),
             "preset": preset,
             "catalog": catalog,
-            "recommendation_text_zh": recommendation_summary(hw, preset or {}, "zh") if preset else "",
-            "recommendation_text_en": recommendation_summary(hw, preset or {}, "en") if preset else "",
+            "recommendation_text_zh": recommendation_summary(hw, preset or {}, "zh")
+            if preset
+            else "",
+            "recommendation_text_en": recommendation_summary(hw, preset or {}, "en")
+            if preset
+            else "",
             "modality_models": self.get_all_modality_models(),
             "ollama_health": self._ollama_health,
             "ollama_last_health_check": self._ollama_last_health_check,
@@ -568,7 +627,7 @@ class RuntimeManager:
 
             prog("model", 30, "starting app Ollama")
             daemon = get_shared_daemon()
-            base = daemon.start(runtime_dir, models_dir())
+            base = daemon.start(runtime_dir, models_dir(), ollama_mirror=self._ollama_mirror)
             self.mark_ollama_ready(base, "app")
 
             if pull_preset:
@@ -634,6 +693,7 @@ class RuntimeManager:
                 message=f"pulling {model_name}",
                 progress={"stage": "pull", "percent": 0, "message": "preparing"},
             )
+            self._pull_stop_event.clear()
             self._pull_thread = threading.Thread(
                 target=self._pull_worker,
                 args=(preset_id,),
@@ -650,11 +710,15 @@ class RuntimeManager:
         }
 
     def _pull_worker(self, preset_id: str) -> None:
+        from sidecar.progress_bus import create_job_queue as _sse_create
+        _sse_create("ollama:pull")
         last_log_ts = 0.0
         last_log_pct = -1
 
         def prog(info: dict[str, Any]) -> None:
             nonlocal last_log_ts, last_log_pct
+            if self._pull_stop_event.is_set():
+                raise InterruptedError("Pull cancelled by stop()")
             stage = info.get("stage", "pull")
             pct = info.get("percent", 0)
             msg = info.get("message", "")
@@ -677,6 +741,19 @@ class RuntimeManager:
                     else 0.0,
                 },
             )
+            from sidecar.progress_bus import emit_progress as _sse_emit
+            import json as _json
+            _sse_emit("ollama:pull", "progress", _json.dumps({
+                "stage": stage,
+                "percent": pct,
+                "message": msg,
+                "total_bytes": info.get("total_bytes", 0),
+                "completed_bytes": info.get("completed_bytes", 0),
+                "speed_bps": info.get("speed_bps", 0.0),
+                "elapsed_sec": _time_mod.monotonic() - self._pull_start_ts
+                if hasattr(self, "_pull_start_ts")
+                else 0.0,
+            }))
 
         try:
             logger.info("Pull started: preset=%s", preset_id)
@@ -690,15 +767,39 @@ class RuntimeManager:
                 local_base_url=base,
                 ollama_source=source,
             )
+            from sidecar.progress_bus import emit_progress as _sse_emit, emit_done as _sse_done
+            import json as _json
+            _sse_emit("ollama:pull", "completed", _json.dumps({"status": "completed"}))
+            _sse_done("ollama:pull")
         except Exception as exc:
             logger.exception("Preset pull failed")
             self._set_state(state="error", message=str(exc)[:500])
+            from sidecar.progress_bus import emit_progress as _sse_emit, emit_done as _sse_done
+            import json as _json
+            _sse_emit("ollama:pull", "failed", _json.dumps({"status": "failed", "error": str(exc)[:500]}))
+            _sse_done("ollama:pull")
         finally:
             self._invalidate_status_cache()
 
     def stop(self) -> None:
         self._stop_health_thread()
+        # Signal pull worker to exit early
+        self._pull_stop_event.set()
         stop_shared_daemon()
+        # Wait for pull thread to finish
+        pull_thread = self._pull_thread
+        if pull_thread and pull_thread.is_alive():
+            pull_thread.join(timeout=5)
+            if pull_thread.is_alive():
+                logger.warning("Pull thread did not exit within 5s after stop()")
+        # Wait for setup worker thread to finish
+        setup_thread = self._thread
+        if setup_thread and setup_thread.is_alive():
+            setup_thread.join(timeout=5)
+            if setup_thread.is_alive():
+                logger.warning("Setup thread did not exit within 5s after stop()")
+        self._pull_thread = None
+        self._thread = None
         with self._lock:
             self._ollama_health = "unknown"
             self._ollama_restart_count = 0
@@ -718,9 +819,12 @@ class RuntimeManager:
         if inference_mode in ("api_only",):
             return None
         snap = self._get_state()
-        if snap["state"] == "ready" and snap["local_base_url"]:
-            if inference_mode in ("prefer_local", "local_only"):
-                return snap["local_base_url"]
+        if (
+            snap["state"] == "ready"
+            and snap["local_base_url"]
+            and inference_mode in ("prefer_local", "local_only")
+        ):
+            return snap["local_base_url"]
         base, _ = self.sync_running()
         if base:
             return base

@@ -1,0 +1,163 @@
+/* ─── Premium UI Animations & Transitions ─── */
+
+@keyframes scaleInPalette {
+  from {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.scale-in-palette {
+  animation: scaleInPalette 0.22s var(--ease-out) forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in {
+  animation: fadeIn 0.15s var(--ease-out) forwards;
+}
+
+/* ─── 3D Card Flip styles (Spaced Repetition Review) ─── */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.transform-style-3d {
+  transform-style: preserve-3d;
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+.rotate-y-0 {
+  transform: rotateY(0deg);
+}
+
+/* Scrollbar styles for next-generation feel */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--color-ink-300);
+  border-radius: var(--radius-sm);
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-500);
+}
+
+/* ─── View transition animations ─── */
+
+@keyframes view-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes view-exit {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-4px); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes scale-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes slide-out-right {
+  from { transform: translateX(0); }
+  to   { transform: translateX(100%); }
+}
+
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-view-enter {
+  animation: view-enter 200ms var(--ease-out) both;
+}
+
+.animate-view-exit {
+  animation: view-exit 150ms ease-in both;
+}
+
+.animate-scale-in {
+  animation: scale-in 150ms var(--ease-out) both;
+}
+
+.animate-scale-out {
+  animation: scale-out 120ms ease-in both;
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 250ms var(--ease-out) both;
+}
+
+.animate-slide-out-right {
+  animation: slide-out-right 200ms ease-in both;
+}
+
+.animate-backdrop-in {
+  animation: backdrop-in 200ms ease-out both;
+}
+
+/* Transition container — hold exit position until animation completes */
+.view-transition-container {
+  position: relative;
+}
+
+.view-transition-container > * {
+  will-change: opacity, transform;
+}
+
+/* ─── Reader presentation animations (applied via React classes) ─── */
+/* NotePreview applies READER_ANIM classes per presentation mode:
+   - sidebar: pane gets animate-slide-in-right
+   - overlay: pane gets animate-slide-in-right, wrapper gets animate-backdrop-in
+   - center:  pane gets animate-scale-in, overlay wrapper gets animate-backdrop-in
+*/
+.note-reader-drawer-scrim {
+  animation: backdrop-in 200ms ease-out both;
+}
+
+/* ─── prefers-reduced-motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-view-enter,
+  .animate-view-exit,
+  .animate-scale-in,
+  .animate-scale-out,
+  .animate-slide-in-right,
+  .animate-slide-out-right,
+  .animate-backdrop-in,
+  .note-reader-drawer-scrim {
+    animation: none;
+  }
+}

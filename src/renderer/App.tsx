@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { Layout } from './components/Layout'
 import { Providers } from './providers'
 import { useAppStore } from './stores/appStore'
@@ -16,6 +17,24 @@ function AppInner(): React.JSX.Element {
   useEffect(() => {
     applyLocale()
   }, [applyLocale])
+
+  useEffect(() => {
+    const theme = settings.theme || 'system'
+    const root = document.documentElement
+    const apply = (t: 'light' | 'dark') => root.setAttribute('data-theme', t)
+
+    if (theme === 'system') {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)')
+      apply(mq.matches ? 'dark' : 'light')
+      const handler = (e: MediaQueryListEvent) => apply(e.matches ? 'dark' : 'light')
+      mq.addEventListener('change', handler)
+      void window.api.setTheme('system')
+      return () => mq.removeEventListener('change', handler)
+    }
+
+    apply(theme)
+    void window.api.setTheme(theme)
+  }, [settings.theme])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -59,7 +78,9 @@ function AppInner(): React.JSX.Element {
 export default function App(): React.JSX.Element {
   return (
     <Providers>
-      <AppInner />
+      <ErrorBoundary>
+        <AppInner />
+      </ErrorBoundary>
     </Providers>
   )
 }

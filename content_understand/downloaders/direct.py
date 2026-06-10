@@ -30,9 +30,14 @@ class DirectDownloader(Downloader):
         return url.startswith(("http://", "https://"))
 
     def get_info(self, url: str) -> VideoInfo:
-        r = requests.head(url, timeout=10, allow_redirects=True, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; content-understand/1.0)",
-        })
+        r = requests.head(
+            url,
+            timeout=10,
+            allow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; content-understand/1.0)",
+            },
+        )
         r.raise_for_status()
         return VideoInfo(
             url=url,

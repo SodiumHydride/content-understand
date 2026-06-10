@@ -1,0 +1,268 @@
+/* ─── Capture (editorial column) ─── */
+.capture-page {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.capture-layout {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0;
+  padding: 0;
+}
+
+.capture-copy {
+  min-height: var(--capture-copy-min-h);
+}
+
+.capture-title {
+  font-family: var(--font-display);
+  font-size: var(--type-display-size);
+  font-weight: var(--type-display-weight);
+  line-height: var(--type-display-leading);
+  letter-spacing: var(--type-display-tracking);
+  color: var(--color-ink-900);
+}
+
+.capture-lead {
+  margin-top: var(--rhythm-title-lead);
+  max-width: 22em;
+  font-size: var(--type-lead-size);
+  line-height: var(--type-lead-leading);
+  letter-spacing: var(--type-lead-tracking);
+  color: var(--color-ink-600);
+}
+
+.capture-composer-wrap {
+  margin-top: var(--rhythm-lead-action);
+}
+
+.capture-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: var(--capture-composer-min-h);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--color-paper);
+  box-shadow: none;
+  transition:
+    border-color var(--duration) var(--ease-out),
+    box-shadow var(--duration) var(--ease-out);
+}
+
+.capture-composer:focus-within {
+  border-color: rgb(106 158 196 / 45%);
+  box-shadow: 0 0 0 3px rgb(106 158 196 / 10%);
+}
+
+.capture-input-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.capture-input {
+  min-width: 0;
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--type-body-leading);
+  color: var(--color-ink-900);
+  outline: none;
+}
+
+.capture-input::placeholder {
+  color: var(--color-ink-500);
+  opacity: 0.85;
+}
+
+.capture-composer-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 2.5rem;
+  padding-top: var(--space-3);
+  margin-top: auto;
+  border-top: 1px solid var(--divider);
+}
+
+.capture-composer .btn-primary {
+  min-width: var(--capture-action-min-w);
+  justify-content: center;
+}
+
+.platform-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.platform-chip {
+  padding: 0.28rem 0.65rem;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--color-ink-600);
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color var(--duration) var(--ease-out),
+    background var(--duration) var(--ease-out);
+}
+
+.platform-chip:hover {
+  color: var(--color-ink-900);
+  background: var(--color-paper-deep);
+}
+
+.platform-chip-active {
+  color: var(--color-ink-900);
+  background: var(--color-paper-deep);
+  font-weight: 600;
+}
+
+/* Capture: top-anchored — vertical center makes the box jump when copy height changes */
+.capture-stage {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: clamp(2.5rem, 10vh, 4.5rem) var(--page-pad-x) var(--space-10);
+  overflow-y: auto;
+}
+
+.capture-pipeline-inline {
+  width: 100%;
+  max-width: var(--content-max);
+  margin-top: var(--space-6);
+}
+
+.capture-foot {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--color-paper-deep);
+  padding: var(--space-4) var(--page-pad-x) var(--space-5);
+}
+
+.capture-foot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.capture-foot-label {
+  font-size: var(--type-section-size);
+  font-weight: var(--type-section-weight);
+  letter-spacing: var(--type-meta-tracking);
+  text-transform: var(--type-section-transform);
+  color: var(--color-ink-500);
+}
+
+.capture-foot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  font-size: var(--text-micro);
+  font-weight: 500;
+  color: var(--color-ink-600);
+  transition: color var(--duration) var(--ease-out);
+}
+
+.capture-foot-link:hover {
+  color: var(--color-ink-900);
+}
+
+.capture-recent-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capture-recent-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0.45rem 0;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: opacity var(--duration) var(--ease-out);
+}
+
+.capture-recent-row:hover {
+  opacity: 0.75;
+}
+
+.capture-recent-dot {
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 999px;
+}
+
+.capture-recent-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-ink-700);
+}
+
+.capture-recent-time {
+  flex-shrink: 0;
+  font-size: var(--text-micro);
+  color: var(--color-ink-500);
+}
+
+/* ─── Capture: write note ─── */
+.capture-write-row {
+  margin-top: var(--space-5);
+}
+
+.capture-write-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.45rem 0.85rem;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--color-ink-700);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong);
+  background: var(--color-paper-deep);
+  transition:
+    background var(--duration) var(--ease-out),
+    border-color var(--duration) var(--ease-out),
+    color var(--duration) var(--ease-out);
+}
+
+.capture-write-btn:hover {
+  color: var(--color-ink-900);
+  border-color: var(--color-accent);
+  background: var(--color-paper);
+}
+
+.btn-ghost-active {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}

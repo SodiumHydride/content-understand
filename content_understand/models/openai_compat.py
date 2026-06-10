@@ -115,9 +115,7 @@ class OpenAICompatModel(VideoModel):
     def _analyze_frames(self, frames: list[str], prompt: str, timeout: int) -> str:
         return self._call_api(self._build_vision_body(frames, prompt), timeout)
 
-    def _understand_video_local_batched(
-        self, frames: list[str], prompt: str, timeout: int
-    ) -> str:
+    def _understand_video_local_batched(self, frames: list[str], prompt: str, timeout: int) -> str:
         """Analyze local Ollama in small batches to avoid payload OOM / HTTP 500."""
         batch_size = 2
         summaries: list[str] = []
@@ -198,9 +196,7 @@ class OpenAICompatModel(VideoModel):
                 return self._understand_video_local_batched(frames, prompt, timeout_val)
 
             return self._analyze_frames(frames, prompt, timeout_val)
-        raise RuntimeError(
-            "OpenAI-compatible backend requires local video file (video_path)"
-        )
+        raise RuntimeError("OpenAI-compatible backend requires local video file (video_path)")
 
     def understand_text(self, prompt: str, timeout: int = 60) -> str:
         body = {

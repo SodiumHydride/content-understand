@@ -95,11 +95,9 @@ def cleanup_stale_port(port: int) -> bool:
         return True  # Port is already free
 
     logger.info("Found PID %d on port %d, killing...", pid, port)
-    if kill_process_by_pid(pid):
-        # Verify port is actually free now
-        if find_process_on_port(port) is None:
-            logger.info("Port %d freed successfully", port)
-            return True
+    if kill_process_by_pid(pid) and find_process_on_port(port) is None:
+        logger.info("Port %d freed successfully", port)
+        return True
     logger.warning("Failed to free port %d", port)
     return False
 

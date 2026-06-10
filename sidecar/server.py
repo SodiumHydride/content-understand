@@ -12,7 +12,8 @@ import platform
 import sys
 import threading
 import uuid
-from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -27,15 +28,24 @@ from engine.config_bridge import settings_to_config
 from engine.index.db import list_pages, open_db
 from engine.index.rebuild import rebuild_from_vault, upsert_single_file
 from engine.paths import app_data_root, ensure_app_dirs, vault_dir
+from sidecar.progress_bus import (
+    create_job_queue,
+    emit_done,
+    emit_progress,
+    get_job_queue,
+    remove_job_queue,
+)
 
 
 def _inject_bundled_ffmpeg():
     """Add bundled ffmpeg to PATH if available and system ffmpeg is missing."""
     import shutil
+
     if shutil.which("ffmpeg"):
         return  # System ffmpeg available
     try:
         from engine.runtime.ffmpeg_manager import find_bundled_ffmpeg
+
         bundled = find_bundled_ffmpeg(app_data_root())
         if bundled:
             ffmpeg_bin_dir = str(Path(bundled).parent)
@@ -56,9 +66,11 @@ def _apply_proxy_env(proxy_settings: dict[str, Any]) -> None:
         logger.info("Proxy set: %s", proxy)
     else:
         # Clear any app-set proxy (keep system proxy)
-        for key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+        for _key in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
             # Only clear if it was set by us (not by the system)
             pass  # Don't clear — let system proxy work
+
+
 from engine.runtime.hardware import probe_hardware
 from engine.runtime.manager import get_runtime_manager
 from engine.runtime.port_utils import (
@@ -79,6 +91,7 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import PlainTextResponse
     from pydantic import BaseModel
+    from sse_starlette.sse import EventSourceResponse
 except ImportError:
     print("Install sidecar deps: pip install fastapi uvicorn pydantic requests", file=sys.stderr)
     sys.exit(1)
@@ -87,6 +100,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Process lifecycle management
 # ---------------------------------------------------------------------------
+
 
 def _pid_file_path() -> Path:
     return app_data_root() / "runtime" / "sidecar.pid"
@@ -146,10 +160,8 @@ def _handle_old_instance(port: int) -> None:
         else:
             logger.info("Removing stale PID file (old PID %d is dead)", old_pid)
         # Clean up the file either way
-        try:
+        with suppress(Exception):
             pid_path.unlink()
-        except Exception:
-            pass
 
     # Even if PID file was missing, check for port conflict
     if not cleanup_stale_port(port):
@@ -167,16 +179,44 @@ async def lifespan(app: FastAPI):
     init_logging()
 
     # Evict stale cache files on startup
-    try:
+    with suppress(Exception):
         cleanup_stale_cache(cache_dir())
+
+    yield
+    # Graceful shutdown: stop app Ollama daemon before sidecar exits.
+    # Set the flag so the atexit handler doesn't double-run shutdown.
+    global _cleanup_done
+    _cleanup_done = True
+
+    # Signal running ingest jobs to stop early
+    _shutdown_event.set()
+    _ingest_pool.shutdown(wait=False, cancel_futures=True)
+
+    try:
+        from engine.runtime.manager import get_runtime_manager
+
+        get_runtime_manager().shutdown()
     except Exception:
         pass
 
-    yield
-    # Graceful shutdown: stop app Ollama daemon before sidecar exits
+    # Close pooled DB connections
     try:
-        from engine.runtime.manager import get_runtime_manager
-        get_runtime_manager().shutdown()
+        from engine.index.db import close_db
+
+        close_db()
+    except Exception:
+        pass
+
+    # Drain progress_bus queues so SSE generators unblock
+    try:
+        from sidecar.progress_bus import _queues
+
+        for q in _queues.values():
+            try:
+                q.shutdown(immediate=True)
+            except Exception:
+                pass
+        _queues.clear()
     except Exception:
         pass
 
@@ -189,8 +229,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def _log_5xx_errors(request, call_next):
+    response = await call_next(request)
+    if response.status_code >= 500:
+        logger.error(
+            "HTTP %d %s %s",
+            response.status_code,
+            request.method,
+            request.url.path,
+        )
+    return response
+
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
+_ingest_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ingest")
+_shutdown_event = threading.Event()
 _engine_config: dict[str, Any] = {}
 
 
@@ -215,7 +270,7 @@ class RuntimeSetupPayload(BaseModel):
 
 
 def _map_progress(stage: str, percent: int, message: str) -> dict:
-    """UI stages: resolve | download | model | write"""
+    """UI stages: resolve | download | setup | model | write"""
     ui_stage = stage
     if stage in ("detect", "understand"):
         ui_stage = "model"
@@ -276,13 +331,17 @@ def _run_ingest(
         cfg.prompt_template = prompt_template
 
     def on_progress(stage: str, percent: int, message: str) -> None:
+        if _shutdown_event.is_set():
+            return
         nonlocal last_stage
         last_stage = stage
         if message:
             log.info("[%s] %s%% — %s", stage, percent, message)
+        mapped = _map_progress(stage, percent, message)
         with _jobs_lock:
             if job_id in _jobs:
-                _jobs[job_id]["progress"] = _map_progress(stage, percent, message)
+                _jobs[job_id]["progress"] = mapped
+        emit_progress(job_id, "progress", json.dumps(mapped))
 
     try:
         log.info("Ingest started: %s (lang=%s, format=%s)", url, cfg.output_language, output_format)
@@ -290,11 +349,13 @@ def _run_ingest(
         if Path(url).expanduser().is_file():
             from engine.understand.orchestrate import understand_path
 
-            result = understand_path(url, config=cfg, on_progress=on_progress,
-                                     output_format=output_format)
+            result = understand_path(
+                url, config=cfg, on_progress=on_progress, output_format=output_format
+            )
         else:
-            result = understand_url(url, config=cfg, on_progress=on_progress,
-                                    output_format=output_format)
+            result = understand_url(
+                url, config=cfg, on_progress=on_progress, output_format=output_format
+            )
 
         on_progress("write", 90, "")
         vp = vault_path()
@@ -306,6 +367,7 @@ def _run_ingest(
         # Evict stale cache files after successful ingest
         try:
             from engine.cache import cleanup_stale_cache
+
             cleanup_stale_cache(Path(cfg.cache_dir), cfg.cache_max_age_seconds)
         except Exception:
             pass
@@ -320,19 +382,35 @@ def _run_ingest(
                     "_done_at": _time.time(),
                 }
             )
+        emit_progress(
+            job_id,
+            "completed",
+            json.dumps({"status": "completed", "result_slug": slug}),
+        )
+        emit_done(job_id)
     except Exception as exc:
         log.error("Ingest failed at %s: %s", last_stage, exc, exc_info=True)
-        fail_stage = last_stage if last_stage in ("resolve", "download", "model", "write") else "model"
+        fail_stage = (
+            last_stage if last_stage in ("resolve", "download", "setup", "model", "write") else "model"
+        )
+        # Keep the last-reported percent so the UI doesn't jump backwards on failure
         with _jobs_lock:
+            cur_percent = _jobs.get(job_id, {}).get("progress", {}).get("percent", 0)
             _jobs[job_id].update(
                 {
                     "status": "failed",
                     "error": str(exc)[:500],
-                    "progress": _map_progress(fail_stage, 0, str(exc)[:200]),
+                    "progress": _map_progress(fail_stage, cur_percent, str(exc)[:200]),
                     "logs": job_log_lines(job_id),
                     "_done_at": _time.time(),
                 }
             )
+        emit_progress(
+            job_id,
+            "failed",
+            json.dumps({"status": "failed", "error": str(exc)[:500]}),
+        )
+        emit_done(job_id)
 
 
 _JOB_TTL_SECONDS = 600  # 10 minutes
@@ -350,13 +428,13 @@ def _cleanup_stale_jobs() -> None:
         ]
         for jid in stale:
             _jobs.pop(jid, None)
+            remove_job_queue(jid)
 
         # Also mark jobs stuck in "processing" for > 15 min as timed out
         stuck = [
             jid
             for jid, job in _jobs.items()
-            if job.get("status") == "processing"
-            and now - job.get("_created_at", now) > 900
+            if job.get("status") == "processing" and now - job.get("_created_at", now) > 900
         ]
         for jid in stuck:
             _jobs[jid].update(
@@ -368,6 +446,13 @@ def _cleanup_stale_jobs() -> None:
                 }
             )
 
+        # Prune log entries for jobs no longer tracked
+        remaining = set(_jobs.keys())
+
+    from engine.app_log import clear_stale_job_logs
+
+    clear_stale_job_logs(remaining)
+
 
 @app.get("/health")
 def health():
@@ -377,11 +462,42 @@ def health():
 
 @app.delete("/shutdown")
 async def shutdown_endpoint():
-    """Called by Electron before quit — triggers lifespan cleanup via SIGTERM."""
-    import signal as _sig
+    """Called by Electron before quit — triggers lifespan cleanup."""
     logger.info("Shutdown requested via /shutdown endpoint")
-    # Send SIGTERM to self so uvicorn's signal handler fires lifespan shutdown
-    os.kill(os.getpid(), _sig.SIGTERM)
+    if _IS_WINDOWS:
+        # Windows: cannot send SIGTERM, trigger shutdown directly
+        _shutdown_event.set()
+        _ingest_pool.shutdown(wait=False, cancel_futures=True)
+        try:
+            get_runtime_manager().shutdown()
+        except Exception:
+            pass
+        try:
+            from engine.index.db import close_db
+
+            close_db()
+        except Exception:
+            pass
+        try:
+            from sidecar.progress_bus import _queues
+
+            for q in _queues.values():
+                try:
+                    q.shutdown(immediate=True)
+                except Exception:
+                    pass
+            _queues.clear()
+        except Exception:
+            pass
+        # Use uvicorn's exit signal on Windows
+        import signal as _sig
+
+        os.kill(os.getpid(), _sig.SIGTERM)
+    else:
+        # Unix: send SIGTERM so uvicorn's signal handler fires lifespan shutdown
+        import signal as _sig
+
+        os.kill(os.getpid(), _sig.SIGTERM)
     return {"status": "shutting_down"}
 
 
@@ -395,7 +511,10 @@ def set_config(body: ConfigPayload):
     global _engine_config
     _engine_config = body.settings
     # Apply proxy settings to environment
-    _apply_proxy_env(body.settings.get("proxySettings", {}))
+    proxy = body.settings.get("proxySettings", {})
+    _apply_proxy_env(proxy)
+    # Propagate Ollama registry mirror to runtime manager
+    get_runtime_manager().set_ollama_mirror(proxy.get("ollamaMirror", ""))
     return {"ok": True}
 
 
@@ -432,6 +551,10 @@ def runtime_setup(body: RuntimeSetupPayload):
     if not body.confirm:
         raise HTTPException(400, "confirm required")
     rt = get_runtime_manager()
+    # Propagate ollama mirror from engine config before starting
+    if _engine_config:
+        proxy = _engine_config.get("proxySettings", {})
+        rt.set_ollama_mirror(proxy.get("ollamaMirror", ""))
     rt.setup_async()
     return {"ok": True, "state": rt.state}
 
@@ -509,6 +632,10 @@ def runtime_auto_detect(body: AutoDetectPayload | None = None):
     payload = body or AutoDetectPayload()
     rt = get_runtime_manager()
     rt.set_prefer_user_ollama(payload.use_user_ollama)
+    # Propagate ollama mirror from engine config before starting
+    if _engine_config:
+        proxy = _engine_config.get("proxySettings", {})
+        rt.set_ollama_mirror(proxy.get("ollamaMirror", ""))
     rt.refresh_hardware()
 
     if rt.state == "ready" and rt.local_base_url:
@@ -547,7 +674,6 @@ def runtime_auto_detect(body: AutoDetectPayload | None = None):
         "recommendation": preset.get("id"),
         "hardware": rt.hardware.to_dict() if rt.hardware else None,
     }
-
 
 
 class CookiesExportPayload(BaseModel):
@@ -655,6 +781,10 @@ def ollama_start(body: OllamaStartPayload | None = None):
     payload = body or OllamaStartPayload()
     rt = get_runtime_manager()
     rt.set_prefer_user_ollama(payload.prefer_user)
+    # Propagate ollama mirror from engine config before starting
+    if _engine_config:
+        proxy = _engine_config.get("proxySettings", {})
+        rt.set_ollama_mirror(proxy.get("ollamaMirror", ""))
 
     runtime_dir = app_data_root() / "runtime"
     base, source = resolve_active_ollama(runtime_dir, prefer_user=payload.prefer_user)
@@ -720,23 +850,27 @@ def ollama_installed_all():
 
     # Preset models
     for m in filter_installed_models(raw):
-        out.append({
-            "name": m.get("installed_name") or m.get("ollama_model", ""),
-            "size": m.get("size", 0),
-            "is_preset": True,
-            "preset_id": m.get("preset_id"),
-            "modalities": m.get("modalities", []),
-        })
+        out.append(
+            {
+                "name": m.get("installed_name") or m.get("ollama_model", ""),
+                "size": m.get("size", 0),
+                "is_preset": True,
+                "preset_id": m.get("preset_id"),
+                "modalities": m.get("modalities", []),
+            }
+        )
 
     # Non-preset (user-installed) models
     for m in installed_non_preset_models(raw):
-        out.append({
-            "name": m["name"],
-            "size": m.get("size", 0),
-            "is_preset": False,
-            "preset_id": None,
-            "modalities": m.get("modalities_guess", ["article"]),
-        })
+        out.append(
+            {
+                "name": m["name"],
+                "size": m.get("size", 0),
+                "is_preset": False,
+                "preset_id": None,
+                "modalities": m.get("modalities_guess", ["article"]),
+            }
+        )
 
     return {"models": out}
 
@@ -786,6 +920,27 @@ def ollama_pull(body: OllamaPullPayload):
 
     threading.Thread(target=_bg_pull, daemon=True, name="ollama-pull-name").start()
     return {"ok": True, "status": "started", "name": model_name}
+
+
+@app.get("/v1/ollama/pull/stream")
+async def ollama_pull_stream():
+    """SSE endpoint for real-time progress updates on an Ollama model pull."""
+    q = get_job_queue("ollama:pull")
+    if q is None:
+        raise HTTPException(404, "no active pull in progress")
+
+    async def event_generator():
+        async_q = q.async_q
+        try:
+            while True:
+                item = await async_q.get()
+                if item is None:
+                    break
+                yield item
+        except Exception:
+            pass
+
+    return EventSourceResponse(event_generator(), ping=15)
 
 
 class OllamaDeletePayload(BaseModel):
@@ -906,10 +1061,7 @@ def get_page(slug: str):
     # Strip frontmatter so save_page doesn't duplicate it
     if raw.startswith("---"):
         parts = raw.split("---", 2)
-        if len(parts) >= 3:
-            body = parts[2].lstrip("\n")
-        else:
-            body = raw
+        body = parts[2].lstrip("\n") if len(parts) >= 3 else raw
     else:
         body = raw
     return {
@@ -929,24 +1081,44 @@ def get_page(slug: str):
 
 @app.get("/v1/search")
 def search_notes(q: str = "", limit: int = 20):
-    import jieba
-
-    from engine.index.db import fts_search, open_db
+    from engine.index.db import open_db
+    from engine.index.search import advanced_search, filters_to_api_dict, parse_query
     from engine.paths import vault_dir
 
     if not q.strip():
-        return {"results": []}
+        return {"results": [], "filters": {}}
 
     vp = vault_dir()
     db_path = vp / ".content-app" / "index.db"
     if not db_path.exists():
-        return {"results": []}
+        return {"results": [], "filters": {}}
 
     conn = open_db(vp)
-    # Tokenize query with jieba for better Chinese matching
-    tokens = " ".join(jieba.cut(q))
-    results = fts_search(conn, tokens, limit=limit)
-    return {"results": results}
+    results = advanced_search(conn, q, limit=limit)
+    parsed = parse_query(q)
+    return {"results": results, "filters": filters_to_api_dict(parsed)}
+
+
+def _backup_page(vault_dir, slug: str, content: str):
+    import time
+    from pathlib import Path
+    
+    safe_slug = slug.replace("/", "_").replace("\\", "_")
+    history_dir = Path(vault_dir) / ".content-app" / "history" / safe_slug
+    history_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = int(time.time())
+    version_file = history_dir / f"{timestamp}.md"
+    version_file.write_text(content, encoding="utf-8")
+    
+    # Keep last 50 versions, delete older ones
+    versions = sorted(history_dir.glob("*.md"), key=lambda f: f.stat().st_mtime)
+    if len(versions) > 50:
+        for old_ver in versions[:-50]:
+            try:
+                old_ver.unlink()
+            except Exception:
+                pass
 
 
 @app.put("/v1/pages/{slug:path}")
@@ -984,27 +1156,63 @@ def save_page(slug: str, body: dict):
         # Split frontmatter and body
         if existing.startswith("---"):
             parts = existing.split("---", 2)
-            if len(parts) >= 3:
-                frontmatter = f"---{parts[1]}---\n"
-            else:
-                frontmatter = ""
+            frontmatter = f"---{parts[1]}---\n" if len(parts) >= 3 else ""
         else:
             frontmatter = ""
+
+        # Backup current page content
+        if md_path.exists():
+            try:
+                _backup_page(vp, slug, existing)
+            except Exception as e:
+                logger.error(f"Failed to backup page {slug}: {e}")
 
         # Write new content
         full_content = frontmatter + new_body
         md_path.write_text(full_content, encoding="utf-8")
 
-        # Update DB metadata (body, body_hash, mtime) WITHOUT touching links
+        # Update DB metadata (body, body_hash, mtime, tags, links)
         body_hash = hashlib.sha256(new_body.encode()).hexdigest()[:16]
         file_mtime = md_path.stat().st_mtime
         from datetime import datetime
+        import json
+        from engine.index.rebuild import _parse_frontmatter, extract_wikilinks, _resolve_wikilink_targets, _wikilink_context, _WIKILINK_RE
+        from engine.index.db import upsert_tags_for_page, delete_links_for_source, upsert_link
+
+        meta, _ = _parse_frontmatter(full_content)
+        raw_tags = meta.get("tags", [])
+        tags_list = []
+        if isinstance(raw_tags, str):
+            if raw_tags.startswith("["):
+                try:
+                    tags_list = json.loads(raw_tags)
+                except Exception:
+                    tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
+            else:
+                tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
+        elif isinstance(raw_tags, list):
+            tags_list = [str(t).strip() for t in raw_tags if str(t).strip()]
 
         conn.execute(
-            "UPDATE pages SET body=?, body_hash=?, file_mtime=?, updated=? WHERE slug=?",
-            (new_body, body_hash, file_mtime, datetime.now().isoformat(), slug),
+            "UPDATE pages SET body=?, body_hash=?, file_mtime=?, updated=?, tags=? WHERE slug=?",
+            (new_body, body_hash, file_mtime, datetime.now().isoformat(), json.dumps(tags_list, ensure_ascii=False), slug),
         )
         conn.commit()
+
+        # Update tags index
+        upsert_tags_for_page(conn, slug, tags_list)
+
+        # Update links index
+        wikilinks = extract_wikilinks(new_body)
+        delete_links_for_source(conn, slug)
+        if wikilinks:
+            resolved = _resolve_wikilink_targets(conn, wikilinks)
+            for match in _WIKILINK_RE.finditer(new_body):
+                raw = match.group(1).strip()
+                target_slug = next((s for r, s in resolved if r == raw), None)
+                if target_slug is not None:
+                    ctx = _wikilink_context(new_body, match.start(), match.end())
+                    upsert_link(conn, slug, target_slug, ctx)
 
         # Rebuild FTS
         fts_rebuild(conn)
@@ -1026,6 +1234,7 @@ def export_page(slug: str):
 def get_backlinks(slug: str):
     from engine.index.db import get_backlinks, open_db
     from engine.paths import vault_dir
+
     vp = vault_dir()
     db_path = vp / ".content-app" / "index.db"
     if not db_path.exists():
@@ -1090,7 +1299,7 @@ def _cleanup_wikilinks_for_deleted(vp: Path, deleted_title: str, conn) -> None:
     """Remove wikilinks referencing the deleted page from all .md files in the vault."""
     import re
 
-    wikilink_re = re.compile(r'\[\[' + re.escape(deleted_title) + r'(?:\|[^\]]+)?\]\]')
+    wikilink_re = re.compile(r"\[\[" + re.escape(deleted_title) + r"(?:\|[^\]]+)?\]\]")
 
     for md_file in vp.rglob("*.md"):
         # Skip the file that's being deleted (if it still exists)
@@ -1105,10 +1314,8 @@ def _cleanup_wikilinks_for_deleted(vp: Path, deleted_title: str, conn) -> None:
             continue
         new_text = wikilink_re.sub(deleted_title, text)
         if new_text != text:
-            try:
+            with suppress(OSError):
                 md_file.write_text(new_text, encoding="utf-8")
-            except OSError:
-                pass
 
 
 @app.delete("/v1/pages/{slug:path}")
@@ -1170,7 +1377,7 @@ def get_note_ink(slug: str):
     page_path = row[0]
 
     md_path = vp / page_path
-    ink_path = md_path.with_suffix('.ink.json')
+    ink_path = md_path.with_suffix(".ink.json")
 
     if not ink_path.exists():
         return {"strokes": []}
@@ -1196,7 +1403,7 @@ def save_note_ink(slug: str, body: dict):
     page_path = row[0]
 
     md_path = vp / page_path
-    ink_path = md_path.with_suffix('.ink.json')
+    ink_path = md_path.with_suffix(".ink.json")
 
     if not ink_path.is_relative_to(vp.resolve()):
         raise HTTPException(400, "Invalid path")
@@ -1211,24 +1418,25 @@ def save_note_ink(slug: str, body: dict):
 def get_graph():
     from engine.index.db import get_all_links, open_db
     from engine.paths import vault_dir
+
     vp = vault_dir()
     db_path = vp / ".content-app" / "index.db"
     if not db_path.exists():
         return {"nodes": [], "edges": []}
     conn = open_db(vp)
     # Get all pages as nodes
-    rows = conn.execute(
-        "SELECT slug, title, type, summary, tags FROM pages"
-    ).fetchall()
+    rows = conn.execute("SELECT slug, title, type, summary, tags FROM pages").fetchall()
     nodes = []
     for r in rows:
-        nodes.append({
-            "slug": r[0],
-            "title": r[1],
-            "type": r[2],
-            "summary": r[3],
-            "tags": json.loads(r[4]) if r[4] else [],
-        })
+        nodes.append(
+            {
+                "slug": r[0],
+                "title": r[1],
+                "type": r[2],
+                "summary": r[3],
+                "tags": json.loads(r[4]) if r[4] else [],
+            }
+        )
     # Get all links as edges
     edges = get_all_links(conn)
     return {"nodes": nodes, "edges": edges}
@@ -1245,12 +1453,37 @@ def ingest(req: IngestRequest):
             "url": req.url,
             "_created_at": _time.time(),
         }
-    threading.Thread(
-        target=_run_ingest,
-        args=(job_id, req.url.strip(), req.output_language, req.prompt_template, req.output_format),
-        daemon=True,
-    ).start()
+    create_job_queue(job_id)
+    _ingest_pool.submit(
+        _run_ingest,
+        job_id,
+        req.url.strip(),
+        req.output_language,
+        req.prompt_template,
+        req.output_format,
+    )
     return {"job_id": job_id}
+
+
+@app.get("/v1/jobs/{job_id}/stream")
+async def job_stream(job_id: str):
+    """SSE endpoint for real-time progress updates on a job."""
+    q = get_job_queue(job_id)
+    if q is None:
+        raise HTTPException(404, "job not found or already finished")
+
+    async def event_generator():
+        async_q = q.async_q
+        try:
+            while True:
+                item = await async_q.get()
+                if item is None:
+                    break
+                yield item
+        except Exception:
+            pass
+
+    return EventSourceResponse(event_generator(), ping=15)
 
 
 @app.get("/v1/jobs/{job_id}")
@@ -1327,6 +1560,93 @@ def get_thinking_canvas_asset(asset_id: str):
     except FileNotFoundError:
         raise HTTPException(404, "asset not found") from None
     return Response(content=data, media_type=mime)
+
+
+class QAPayload(BaseModel):
+    question: str
+    history: list[dict[str, str]] = []
+
+
+@app.post("/v1/qa")
+def post_qa(body: QAPayload):
+    from engine.config_bridge import settings_to_config
+    from engine.qa.retriever import retrieve_context
+    from engine.qa.answer import generate_answer
+
+    if not _engine_config:
+        raise HTTPException(400, "App config not initialized. Open settings first.")
+
+    cfg = settings_to_config(_engine_config)
+    try:
+        retrieved = retrieve_context(body.question)
+        answer = generate_answer(
+            cfg,
+            question=body.question,
+            context=retrieved["context"],
+            chat_history=body.history
+        )
+        return {
+            "answer": answer,
+            "sources": retrieved["sources"]
+        }
+    except Exception as e:
+        logger.error(f"QA endpoint failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/v1/pages/{slug:path}/recommendations")
+def get_page_recommendations(slug: str, limit: int = 5):
+    from engine.index.db import open_db
+    from engine.paths import vault_dir
+    from engine.index.auto_link import get_recommendations
+
+    vp = vault_dir()
+    conn = open_db(vp)
+    try:
+        recs = get_recommendations(conn, slug, limit)
+        return {"recommendations": recs}
+    except Exception as e:
+        logger.error(f"Failed to get recommendations for {slug}: {e}")
+        raise HTTPException(500, str(e))
+
+
+@app.get("/v1/pages/{slug:path}/history")
+def get_page_history(slug: str):
+    from engine.paths import vault_dir
+    from datetime import datetime
+    
+    vp = vault_dir()
+    safe_slug = slug.replace("/", "_").replace("\\", "_")
+    history_dir = vp / ".content-app" / "history" / safe_slug
+    if not history_dir.exists():
+        return {"versions": []}
+    
+    versions = []
+    for f in sorted(history_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True):
+        try:
+            ts = int(f.stem)
+            dt_str = datetime.fromtimestamp(ts).isoformat()
+        except Exception:
+            ts = 0
+            dt_str = ""
+            
+        versions.append({
+            "timestamp": ts,
+            "formatted_time": dt_str,
+            "size": f.stat().st_size
+        })
+    return {"versions": versions}
+
+
+@app.get("/v1/pages/{slug:path}/history/{timestamp:int}")
+def get_page_history_version(slug: str, timestamp: int):
+    from engine.paths import vault_dir
+    vp = vault_dir()
+    safe_slug = slug.replace("/", "_").replace("\\", "_")
+    version_file = vp / ".content-app" / "history" / safe_slug / f"{timestamp}.md"
+    if not version_file.exists():
+        raise HTTPException(404, "Version not found")
+    return {"body": version_file.read_text(encoding="utf-8")}
 
 
 def main():

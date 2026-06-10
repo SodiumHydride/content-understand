@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { Search, ChevronDown, Copy, Check } from 'lucide-react'
 import clsx from 'clsx'
+import { useTranslation } from 'react-i18next'
 import { useLogs } from '../hooks/useOllamaQueries'
 import type { LogEntry } from '../lib/sidecar'
 
@@ -76,11 +77,8 @@ function LogLine({
   )
 }
 
-interface LogViewerProps {
-  isZh: boolean
-}
-
-export function LogViewer({ isZh }: LogViewerProps): React.JSX.Element {
+export function LogViewer(): React.JSX.Element {
+  const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [levelFilter, setLevelFilter] = useState<Set<LogLevel>>(
     new Set(['error', 'warn', 'info', 'debug'])
@@ -88,7 +86,8 @@ export function LogViewer({ isZh }: LogViewerProps): React.JSX.Element {
   const [autoScroll, setAutoScroll] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
 
-  const { data: logs = [] } = useLogs({ limit: 500 })
+  const { data } = useLogs({ limit: 500 })
+  const logs = data ?? []
 
   const filtered = useMemo(() => {
     return logs.filter((log) => {
@@ -117,7 +116,7 @@ export function LogViewer({ isZh }: LogViewerProps): React.JSX.Element {
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-500" />
           <input
             type="text"
-            placeholder={isZh ? '搜索日志…' : 'Filter logs…'}
+            placeholder={t('log.filterLogs')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full rounded border-none bg-[var(--color-paper-deep)] py-1 pl-7 pr-2 text-[11px] text-ink-800 outline-none placeholder:text-ink-500"
@@ -151,7 +150,7 @@ export function LogViewer({ isZh }: LogViewerProps): React.JSX.Element {
               ? 'bg-[var(--color-accent)] text-white'
               : 'bg-[var(--color-paper-deep)] text-ink-500'
           )}
-          title={isZh ? '自动滚动' : 'Auto-scroll'}
+          title={t('log.autoScroll')}
         >
           <ChevronDown size={12} />
         </button>
@@ -162,18 +161,14 @@ export function LogViewer({ isZh }: LogViewerProps): React.JSX.Element {
         <div className="flex flex-1 items-center justify-center p-4">
           <p className="text-[11px] text-ink-500">
             {logs.length === 0
-              ? isZh
-                ? '暂无日志'
-                : 'No logs yet'
-              : isZh
-                ? '无匹配日志'
-                : 'No matching logs'}
+              ? t('log.noLogs')
+              : t('log.noMatchingLogs')}
           </p>
         </div>
       ) : (
         <>
           <div className="border-b border-[var(--divider)] px-3 py-0.5 text-[10px] text-ink-500">
-            {filtered.length} {isZh ? '条' : 'entries'}
+            {filtered.length} {t('log.entries')}
           </div>
           <Virtuoso
             ref={virtuosoRef}

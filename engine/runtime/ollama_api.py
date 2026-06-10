@@ -6,7 +6,6 @@ import json
 import logging
 from collections.abc import Callable
 from typing import Any
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
@@ -141,34 +140,40 @@ def pull_model(base_url: str, name: str, on_progress: ProgressFn | None = None) 
 
                 if on_progress and total > 0:
                     pct = int(completed / total * 100)
-                    on_progress({
-                        "stage": "download",
-                        "percent": pct,
-                        "message": status,
-                        "total_bytes": total,
-                        "completed_bytes": completed,
-                        "speed_bps": speed_bps,
-                    })
+                    on_progress(
+                        {
+                            "stage": "download",
+                            "percent": pct,
+                            "message": status,
+                            "total_bytes": total,
+                            "completed_bytes": completed,
+                            "speed_bps": speed_bps,
+                        }
+                    )
                 elif on_progress:
-                    on_progress({
-                        "stage": "download",
-                        "percent": 0,
-                        "message": status,
-                        "total_bytes": total,
-                        "completed_bytes": completed,
-                        "speed_bps": speed_bps,
-                    })
+                    on_progress(
+                        {
+                            "stage": "download",
+                            "percent": 0,
+                            "message": status,
+                            "total_bytes": total,
+                            "completed_bytes": completed,
+                            "speed_bps": speed_bps,
+                        }
+                    )
 
                 if status == "success":
                     if on_progress:
-                        on_progress({
-                            "stage": "download",
-                            "percent": 100,
-                            "message": "done",
-                            "total_bytes": total,
-                            "completed_bytes": completed,
-                            "speed_bps": 0.0,
-                        })
+                        on_progress(
+                            {
+                                "stage": "download",
+                                "percent": 100,
+                                "message": "done",
+                                "total_bytes": total,
+                                "completed_bytes": completed,
+                                "speed_bps": 0.0,
+                            }
+                        )
                     return True
 
         return True

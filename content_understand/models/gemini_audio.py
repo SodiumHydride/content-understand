@@ -62,8 +62,10 @@ _DEFAULT_AUDIO_PROMPT: dict[str, str] = {
 
 def _gemini_url_factory(model_name: str):
     """Return a url_factory that builds the Gemini endpoint URL (no key in query)."""
+
     def _build_url(_key: str) -> str:
         return f"{_GEMINI_API_BASE}/{model_name}:generateContent"
+
     return _build_url
 
 
@@ -87,8 +89,14 @@ class GeminiAudioModel(AudioModel):
         self.timeout = config.timeout or 300
         self._url_factory = _gemini_url_factory(self.model_name)
 
-    def _call_gemini(self, parts: list[dict], timeout: int, label: str,
-                     output_format: str = "text", json_schema: dict | None = None) -> str | dict:
+    def _call_gemini(
+        self,
+        parts: list[dict],
+        timeout: int,
+        label: str,
+        output_format: str = "text",
+        json_schema: dict | None = None,
+    ) -> str | dict:
         gen_config: dict = {"maxOutputTokens": 8192}
 
         # Structured output: Gemini uses responseMimeType + responseSchema
@@ -114,6 +122,7 @@ class GeminiAudioModel(AudioModel):
         # Parse JSON if structured output was requested
         if output_format == "json":
             import json
+
             try:
                 return json.loads(result)
             except json.JSONDecodeError:
@@ -141,8 +150,9 @@ class GeminiAudioModel(AudioModel):
             {"text": prompt},
         ]
 
-        return self._call_gemini(parts, timeout or self.timeout, "understand",
-                               output_format, json_schema)
+        return self._call_gemini(
+            parts, timeout or self.timeout, "understand", output_format, json_schema
+        )
 
     def transcribe_audio(
         self,

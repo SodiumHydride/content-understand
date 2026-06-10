@@ -26,6 +26,8 @@ const api = {
   getDataSize: (): Promise<number> => ipcRenderer.invoke('app:getDataSize'),
   deleteAllData: (): Promise<{ ok: boolean; canceled?: boolean }> =>
     ipcRenderer.invoke('app:deleteAllData'),
+  setTheme: (theme: 'light' | 'dark' | 'system'): Promise<void> =>
+    ipcRenderer.invoke('app:setTheme', theme),
 }
 
 contextBridge.exposeInMainWorld('api', api)

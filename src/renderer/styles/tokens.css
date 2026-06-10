@@ -1,0 +1,165 @@
+/* ─── Design tokens v3: calm note desk ─── */
+@theme {
+  --color-ink-900: #1c1917;
+  --color-ink-800: #292524;
+  --color-ink-700: #57534e;
+  --color-ink-600: #78716c;
+  --color-ink-400: #bdb9b5;
+  --color-ink-300: #d6d3d1;
+  --color-ink-500: #a8a29e;
+  --color-paper: #fffcf9;
+  --color-paper-deep: #f7f4ef;
+  --color-shelf: #f5f2ec;
+  --color-cream-100: #fffcf9;
+  --color-cream-200: #ede9e3;
+  --color-cream-300: #ddd8d0;
+  --color-accent: #6a9ec4;
+  --color-accent-hover: #5889ad;
+  --color-accent-soft: #eef4f9;
+  --color-blush: #e8c4d0;
+  --color-blush-deep: #b07a8f;
+  --color-blush-soft: #faf4f6;
+  --color-sky-soft: #f2f7fb;
+  --color-danger: #c97070;
+  --color-danger-soft: #fdf3f3;
+  --font-sans: 'Inter', 'Noto Sans SC', 'PingFang SC', -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+  --font-serif: 'Source Serif 4', 'Noto Serif SC', Georgia, 'Times New Roman', serif;
+  --font-display: var(--font-serif);
+  --font-reading: var(--font-serif);
+  --font-mono: 'SF Mono', ui-monospace, Menlo, monospace;
+}
+
+:root {
+  --color-body-bg: #ebe7e1;
+  --color-ink-50: #f5f5f5;
+  --color-ink-100: #e8e8e8;
+  --border: #e8e4de;
+  --border-strong: #ddd8d0;
+  --divider: rgb(28 25 23 / 5%);
+  --divider-strong: rgb(28 25 23 / 9%);
+
+  --shadow-sm: 0 1px 2px rgb(28 25 23 / 4%);
+  --shadow-md: 0 4px 16px rgb(28 25 23 / 6%);
+  --shadow-shell: 0 0 0 1px var(--border);
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-14: 3.5rem;
+  --space-16: 4rem;
+
+  --text-display: clamp(1.5rem, 2vw, 1.875rem);
+  --text-title: 1.0625rem;
+  --text-body: 1rem;
+  --text-caption: 0.8125rem;
+  --text-micro: 0.6875rem;
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.75rem;
+
+  --titlebar-h: 52px;
+  --preview-w: min(28rem, 42vw);
+  --content-max: 32rem;
+  --reader-measure: 65ch;
+  --page-max: 56rem;
+  --page-pad-x: clamp(1.5rem, 5vw, 2.5rem);
+
+  /* Vertical rhythm — shared across locales so layout doesn't jump on switch */
+  --rhythm-title-lead: var(--space-6);
+  --rhythm-lead-action: var(--space-10);
+  --rhythm-section: var(--space-8);
+
+  /* Layout stability — language switch should not move chrome / composer */
+  --chrome-row-h: 2.75rem;
+  --tab-min-w: 5.5rem;
+  --status-pill-min-w: 6.5rem;
+  --capture-copy-min-h: 5.25rem;
+  --capture-composer-min-h: 7.25rem;
+  --capture-action-min-w: 9rem;
+  --page-heading-min-h: 3.75rem;
+  --view-toolbar-h: 2.75rem;
+  --vault-strip-h: 2.25rem;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration: 0.16s;
+  --type-transition: 0.22s var(--ease-out);
+
+  /* Typography roles — one baseline; locale only nudges tracking & section style */
+  --type-display-size: var(--text-display);
+  --type-display-weight: 500;
+  --type-display-leading: 1.45;
+  --type-display-tracking: 0.02em;
+
+  --type-page-size: 1.375rem;
+  --type-page-weight: 500;
+  --type-page-leading: 1.35;
+  --type-page-tracking: 0.02em;
+
+  --type-lead-size: 0.9375rem;
+  --type-lead-leading: 1.75;
+  --type-lead-tracking: 0.02em;
+
+  --type-body-leading: 1.65;
+  --type-prose-leading: 1.82;
+
+  --type-section-size: var(--text-micro);
+  --type-section-weight: 600;
+  --type-section-tracking: 0.06em;
+  --type-section-transform: uppercase;
+
+  --type-meta-tracking: 0.04em;
+
+  --type-video: #d49aaa;
+  --type-image: #7eb89a;
+  --type-audio: #d4b07a;
+  --type-article: #6a9ec4;
+}
+
+/* Dark mode — single source of truth. JS maps system preference to data-theme. */
+[data-theme="dark"] {
+  --color-ink-900: #f5f5f4;
+  --color-ink-800: #e7e5e4;
+  --color-ink-700: #d6d3d1;
+  --color-ink-600: #a8a29e;
+  --color-ink-500: #78716c;
+  --color-ink-400: #57534e;
+  --color-ink-300: #292524;
+
+  --color-paper: #1c1917;
+  --color-paper-deep: #0f0e0d;
+  --color-shelf: #292524;
+  
+  --color-cream-100: #1c1917;
+  --color-cream-200: #292524;
+  --color-cream-300: #44403c;
+
+  --color-accent: #8abae0;
+  --color-accent-hover: #a5cdf0;
+  --color-accent-soft: #252e38;
+
+  --color-blush: #4c2c36;
+  --color-blush-deep: #e8c4d0;
+  --color-blush-soft: #2d1e23;
+
+  --color-sky-soft: #1e293b;
+
+  --color-danger: #e08a8a;
+  --color-danger-soft: #381e1e;
+
+  --border: #3c3937;
+  --border-strong: #44403c;
+  --divider: rgb(245 245 244 / 8%);
+  --divider-strong: rgb(245 245 244 / 15%);
+  --color-body-bg: #0f0e0d;
+  --color-ink-50: #1a1a1a;
+  --color-ink-100: #262626;
+}
+

@@ -39,12 +39,23 @@ CREATE TABLE IF NOT EXISTS links (
     source_slug TEXT NOT NULL,
     target_slug TEXT NOT NULL,
     context TEXT,
+    link_type TEXT DEFAULT 'wikilink',
+    created_at REAL DEFAULT (julianday('now')),
     PRIMARY KEY (source_slug, target_slug),
     FOREIGN KEY (source_slug) REFERENCES pages(slug) ON DELETE CASCADE,
     FOREIGN KEY (target_slug) REFERENCES pages(slug) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_slug);
+
+CREATE TABLE IF NOT EXISTS tags (
+    slug TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (slug, tag),
+    FOREIGN KEY (slug) REFERENCES pages(slug) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_tags_tag ON tags(tag);
 
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
@@ -93,10 +104,30 @@ def open_db(vault_path: Path) -> sqlite3.Connection:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")  # Concurrent reads + single write
         conn.execute("PRAGMA busy_timeout=10000")  # 10s retry on lock
+        conn.execute("PRAGMA foreign_keys=ON")  # Enable foreign keys
         conn.executescript(SCHEMA)
         _migrate(conn)
         _connections[db_path] = conn
         return conn
+
+
+def close_db() -> None:
+    """Close all pooled database connections. Safe to call multiple times.
+
+    Attempts a WAL checkpoint on each connection before closing so the
+    WAL file is merged back into the main database and cleaned up.
+    """
+    with _pool_lock:
+        for db_path, conn in list(_connections.items()):
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _connections.clear()
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -105,6 +136,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("SELECT body FROM pages LIMIT 1")
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE pages ADD COLUMN body TEXT NOT NULL DEFAULT ''")
+    
+    # Migrate links table for link_type and created_at
+    try:
+        conn.execute("SELECT link_type FROM links LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE links ADD COLUMN link_type TEXT DEFAULT 'wikilink'")
+            conn.execute("ALTER TABLE links ADD COLUMN created_at REAL DEFAULT (julianday('now'))")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
 
 
@@ -161,13 +202,60 @@ def list_all_slugs(conn: sqlite3.Connection) -> set[str]:
     return {row[0] for row in rows}
 
 
-def upsert_link(conn: sqlite3.Connection, source_slug: str, target_slug: str, context: str | None = None) -> None:
+def upsert_link(
+    conn: sqlite3.Connection,
+    source_slug: str,
+    target_slug: str,
+    context: str | None = None,
+    link_type: str = "wikilink",
+) -> None:
     """Insert or replace a wikilink edge."""
     conn.execute(
-        "INSERT OR REPLACE INTO links (source_slug, target_slug, context) VALUES (?, ?, ?)",
-        (source_slug, target_slug, context),
+        """
+        INSERT INTO links (source_slug, target_slug, context, link_type)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(source_slug, target_slug) DO UPDATE SET
+            context=excluded.context,
+            link_type=excluded.link_type
+        """,
+        (source_slug, target_slug, context, link_type),
     )
     conn.commit()
+
+
+def delete_tags_for_page(conn: sqlite3.Connection, slug: str) -> None:
+    """Delete all tags for a page."""
+    conn.execute("DELETE FROM tags WHERE slug=?", (slug,))
+    conn.commit()
+
+
+def upsert_tags_for_page(conn: sqlite3.Connection, slug: str, tags: list[str]) -> None:
+    """Replace all tags for a page."""
+    delete_tags_for_page(conn, slug)
+    if tags:
+        conn.executemany(
+            "INSERT OR REPLACE INTO tags (slug, tag) VALUES (?, ?)",
+            [(slug, t) for t in tags],
+        )
+        conn.commit()
+
+
+def get_tags_for_page(conn: sqlite3.Connection, slug: str) -> list[str]:
+    """Get all tags for a page."""
+    rows = conn.execute("SELECT tag FROM tags WHERE slug=?", (slug,)).fetchall()
+    return [row[0] for row in rows]
+
+
+def get_pages_with_tag(conn: sqlite3.Connection, tag: str) -> list[str]:
+    """Get all pages that have a specific tag."""
+    rows = conn.execute("SELECT slug FROM tags WHERE tag=?", (tag,)).fetchall()
+    return [row[0] for row in rows]
+
+
+def list_all_tags(conn: sqlite3.Connection) -> list[str]:
+    """List all unique tags in the system."""
+    rows = conn.execute("SELECT DISTINCT tag FROM tags ORDER BY tag").fetchall()
+    return [row[0] for row in rows]
 
 
 def delete_links_for_source(conn: sqlite3.Connection, source_slug: str) -> None:
@@ -193,9 +281,7 @@ def get_backlinks(conn: sqlite3.Connection, target_slug: str) -> list[dict[str, 
 
 def get_all_links(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """Return all link edges for graph building."""
-    rows = conn.execute(
-        "SELECT source_slug, target_slug, context FROM links"
-    ).fetchall()
+    rows = conn.execute("SELECT source_slug, target_slug, context FROM links").fetchall()
     return [dict(r) for r in rows]
 
 
@@ -209,7 +295,5 @@ def list_titles(conn: sqlite3.Connection, limit: int = 500) -> list[str]:
 
 
 def list_pages(conn: sqlite3.Connection, limit: int = 200) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        "SELECT * FROM pages ORDER BY updated DESC LIMIT ?", (limit,)
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM pages ORDER BY updated DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]

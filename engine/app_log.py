@@ -15,6 +15,7 @@ _lock = threading.Lock()
 _ring: deque[dict[str, Any]] = deque(maxlen=500)
 _job_logs: dict[str, deque[dict[str, Any]]] = {}
 _initialized = False
+_init_lock = threading.Lock()
 
 
 class _RingHandler(logging.Handler):
@@ -38,7 +39,11 @@ class _RingHandler(logging.Handler):
                     buf = _job_logs.setdefault(job_id, deque(maxlen=100))
                     buf.append(entry)
         except Exception:
-            pass
+            import sys
+            try:
+                sys.stderr.write(f"[RingHandler] emit failed: {record}\n")
+            except Exception:
+                pass
 
 
 def init_logging() -> Path:
@@ -49,39 +54,40 @@ def init_logging() -> Path:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "sidecar.log"
 
-    if _initialized:
+    with _init_lock:
+        if _initialized:
+            return log_file
+
+        fmt = logging.Formatter(
+            "%(asctime)s %(levelname)s [%(name)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
+        root = logging.getLogger()
+        root.setLevel(logging.INFO)
+
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+
+        ring = _RingHandler()
+        ring.setLevel(logging.INFO)
+        ring.setFormatter(fmt)
+
+        # Avoid duplicate handlers on reload
+        root.handlers.clear()
+        root.addHandler(fh)
+        root.addHandler(ring)
+
+        # Console for Electron sidecar subprocess
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(fmt)
+        root.addHandler(ch)
+
+        _initialized = True
+        logging.getLogger(__name__).info("Logging initialized → %s", log_file)
         return log_file
-
-    fmt = logging.Formatter(
-        "%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    root = logging.getLogger()
-    root.setLevel(logging.INFO)
-
-    fh = logging.FileHandler(log_file, encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(fmt)
-
-    ring = _RingHandler()
-    ring.setLevel(logging.INFO)
-    ring.setFormatter(fmt)
-
-    # Avoid duplicate handlers on reload
-    root.handlers.clear()
-    root.addHandler(fh)
-    root.addHandler(ring)
-
-    # Console for Electron sidecar subprocess
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(fmt)
-    root.addHandler(ch)
-
-    _initialized = True
-    logging.getLogger(__name__).info("Logging initialized → %s", log_file)
-    return log_file
 
 
 class _JobLoggerAdapter(logging.LoggerAdapter):
@@ -105,14 +111,11 @@ def recent_logs(
 ) -> list[dict[str, Any]]:
     """Return recent log entries newest-first."""
     with _lock:
-        if job_id and job_id in _job_logs:
-            items = list(_job_logs[job_id])
-        else:
-            items = list(_ring)
+        items = list(_job_logs[job_id]) if job_id and job_id in _job_logs else list(_ring)
 
-    if level:
-        lvl = level.lower()
-        items = [e for e in items if e.get("level") == lvl]
+        if level:
+            lvl = level.lower()
+            items = [e for e in items if e.get("level") == lvl]
 
     items = sorted(items, key=lambda e: e.get("ts", 0), reverse=True)
     return items[: max(1, min(limit, 500))]
@@ -126,6 +129,14 @@ def job_log_lines(job_id: str, limit: int = 50) -> list[str]:
         f"{e.get('level', 'info').upper()} {e.get('message', '')}"
         for e in reversed(entries)
     ]
+
+
+def clear_stale_job_logs(active_ids: set[str]) -> None:
+    """Remove _job_logs entries whose job_id is not in *active_ids*."""
+    with _lock:
+        stale = [jid for jid in _job_logs if jid not in active_ids]
+        for jid in stale:
+            del _job_logs[jid]
 
 
 def clear_job_logs(job_id: str) -> None:

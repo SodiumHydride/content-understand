@@ -29,7 +29,11 @@ class MimoModel(VideoModel):
 
     def _post(self, body: dict, timeout: int, label: str) -> str:
         return rotate_request(
-            self.api_base, body, self.rotator, timeout, f"mimo:{label}",
+            self.api_base,
+            body,
+            self.rotator,
+            timeout,
+            f"mimo:{label}",
             headers_factory=_mimo_headers,
         )
 

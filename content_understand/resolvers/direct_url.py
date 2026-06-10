@@ -10,17 +10,34 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
-
-from content_understand.resolvers._ssrf import validate_url_not_ssrf
+from content_understand.resolvers._ssrf import create_safe_session
 from content_understand.resolvers.base import Resolver, ResolveResult
 
 logger = logging.getLogger(__name__)
 
 _MEDIA_EXTENSIONS = {
-    ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tiff", ".svg",
-    ".mp3", ".wav", ".flac", ".aac", ".ogg", ".aiff", ".m4a", ".wma",
-    ".mp4", ".mkv", ".webm", ".avi", ".mov", ".flv",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".tiff",
+    ".svg",
+    ".mp3",
+    ".wav",
+    ".flac",
+    ".aac",
+    ".ogg",
+    ".aiff",
+    ".m4a",
+    ".wma",
+    ".mp4",
+    ".mkv",
+    ".webm",
+    ".avi",
+    ".mov",
+    ".flv",
 }
 
 
@@ -45,9 +62,9 @@ class DirectURLResolver(Resolver):
 
         os.makedirs(cache_dir, exist_ok=True)
 
-        validate_url_not_ssrf(input)
+        session = create_safe_session()
 
-        r = requests.get(
+        r = session.get(
             input,
             timeout=timeout,
             stream=True,
@@ -64,7 +81,7 @@ class DirectURLResolver(Resolver):
         local_path = os.path.join(cache_dir, filename)
 
         with open(local_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
+            for chunk in session.safe_iter_content(r, chunk_size=8192):
                 f.write(chunk)
 
         size = os.path.getsize(local_path)

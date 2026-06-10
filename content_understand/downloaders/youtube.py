@@ -8,6 +8,7 @@ import re
 import tempfile
 import uuid
 from pathlib import Path
+from typing import ClassVar
 
 import yt_dlp
 
@@ -27,13 +28,19 @@ def _ydl_opts(**overrides) -> dict:
         "retries": 3,
     }
     base.update(overrides)
+    proxy = os.environ.get("https_proxy") or os.environ.get("http_proxy")
+    if proxy:
+        base["proxy"] = proxy
     return base
 
 
 class YouTubeDownloader(Downloader):
     """Downloader for YouTube videos via yt-dlp Python library."""
 
-    _PATTERNS = [re.compile(r"(www\.)?youtube\.com"), re.compile(r"youtu\.be")]
+    _PATTERNS: ClassVar[list[re.Pattern[str]]] = [
+        re.compile(r"(www\.)?youtube\.com"),
+        re.compile(r"youtu\.be"),
+    ]
 
     def __init__(self, quality: int = VIDEO_QUALITY_DEFAULT) -> None:
         self.quality = quality
@@ -97,8 +104,16 @@ class YouTubeDownloader(Downloader):
         # Fallback: search by ID in the output directory
         video_id = info.get("id", "")
         for candidate in Path(output_dir).iterdir():
-            if candidate.is_file() and video_id in candidate.name and candidate.suffix in (
-                ".mp4", ".mkv", ".webm", ".mov",
+            if (
+                candidate.is_file()
+                and video_id in candidate.name
+                and candidate.suffix
+                in (
+                    ".mp4",
+                    ".mkv",
+                    ".webm",
+                    ".mov",
+                )
             ):
                 return str(candidate.resolve())
 

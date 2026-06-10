@@ -11,8 +11,8 @@ import os
 import platform
 import shutil
 import stat
-import zipfile
 import tarfile
+import zipfile
 from pathlib import Path
 
 import requests
@@ -62,10 +62,15 @@ def find_system_ffmpeg() -> str | None:
     return shutil.which("ffmpeg")
 
 
-def ensure_ffmpeg(app_data_root: Path, on_progress=None) -> str | None:
+def ensure_ffmpeg(app_data_root: Path, on_progress=None, mirror: str | None = None) -> str | None:
     """Ensure ffmpeg is available. Returns path to ffmpeg binary.
 
     Priority: system PATH > bundled > download.
+
+    Args:
+        mirror: Optional mirror URL prefix. If provided, the mirror URL
+            (mirror + original_path) is tried first; falls back to the
+            original source URL on failure.
     """
     # 1. Check system PATH
     system = find_system_ffmpeg()
@@ -78,11 +83,17 @@ def ensure_ffmpeg(app_data_root: Path, on_progress=None) -> str | None:
         return bundled
 
     # 3. Download
-    return download_ffmpeg(app_data_root, on_progress)
+    return download_ffmpeg(app_data_root, on_progress, mirror=mirror)
 
 
-def download_ffmpeg(app_data_root: Path, on_progress=None) -> str | None:
-    """Download static ffmpeg binary for current platform."""
+def download_ffmpeg(app_data_root: Path, on_progress=None, mirror: str | None = None) -> str | None:
+    """Download static ffmpeg binary for current platform.
+
+    Args:
+        mirror: Optional mirror URL prefix. If provided, the mirror URL
+            (mirror + original_path) is tried first; falls back to the
+            original source URL on failure.
+    """
     system = platform.system()
     arch = platform.machine()
     key = (system, arch)
@@ -92,7 +103,7 @@ def download_ffmpeg(app_data_root: Path, on_progress=None) -> str | None:
         logger.warning("No ffmpeg download available for %s/%s", system, arch)
         return None
 
-    url = source["url"]
+    original_url = source["url"]
     binary_name = source["binary"]
     dest_dir = ffmpeg_dir(app_data_root)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -101,52 +112,64 @@ def download_ffmpeg(app_data_root: Path, on_progress=None) -> str | None:
     if dest_path.exists():
         return str(dest_path)
 
-    logger.info("Downloading ffmpeg from %s", url)
+    # Build URL list: mirror first (if provided), then original
+    urls: list[str] = []
+    if mirror:
+        from urllib.parse import urlparse
+        parsed = urlparse(original_url)
+        mirror_url = mirror.rstrip("/") + parsed.path
+        urls.append(mirror_url)
+    urls.append(original_url)
+
     if on_progress:
         on_progress("download", 10, "Downloading ffmpeg...")
 
-    try:
-        resp = requests.get(url, stream=True, timeout=120)
-        resp.raise_for_status()
+    for url in urls:
+        logger.info("Downloading ffmpeg from %s", url)
+        try:
+            resp = requests.get(url, stream=True, timeout=120)
+            resp.raise_for_status()
 
-        # Download to temp file
-        tmp_path = dest_dir / "ffmpeg_download.tmp"
-        total = int(resp.headers.get("content-length", 0))
-        downloaded = 0
+            # Download to temp file
+            tmp_path = dest_dir / "ffmpeg_download.tmp"
+            total = int(resp.headers.get("content-length", 0))
+            downloaded = 0
 
-        with open(tmp_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
-                downloaded += len(chunk)
-                if total > 0 and on_progress:
-                    pct = 10 + int(80 * downloaded / total)
-                    on_progress("download", pct, f"Downloading ffmpeg... {downloaded // (1024*1024)}MB")
+            with open(tmp_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total > 0 and on_progress:
+                        pct = 10 + int(80 * downloaded / total)
+                        on_progress(
+                            "download", pct, f"Downloading ffmpeg... {downloaded // (1024 * 1024)}MB"
+                        )
 
-        # Extract based on file type
-        if url.endswith(".zip"):
-            _extract_zip(tmp_path, dest_dir, binary_name)
-        elif url.endswith(".tar.xz") or url.endswith(".tar.gz"):
-            _extract_tar(tmp_path, dest_dir, binary_name)
-        else:
-            # Assume it's a direct binary
-            tmp_path.rename(dest_path)
+            # Extract based on file type
+            if url.endswith(".zip"):
+                _extract_zip(tmp_path, dest_dir, binary_name)
+            elif url.endswith(".tar.xz") or url.endswith(".tar.gz"):
+                _extract_tar(tmp_path, dest_dir, binary_name)
+            else:
+                # Assume it's a direct binary
+                tmp_path.rename(dest_path)
 
-        # Cleanup temp
-        if tmp_path.exists():
-            tmp_path.unlink()
+            # Cleanup temp
+            if tmp_path.exists():
+                tmp_path.unlink()
 
-        # Make executable
-        if dest_path.exists():
-            dest_path.chmod(dest_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-            logger.info("ffmpeg installed: %s", dest_path)
-            if on_progress:
-                on_progress("download", 100, "ffmpeg installed")
-            return str(dest_path)
+            # Make executable
+            if dest_path.exists():
+                dest_path.chmod(dest_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+                logger.info("ffmpeg installed: %s", dest_path)
+                if on_progress:
+                    on_progress("download", 100, "ffmpeg installed")
+                return str(dest_path)
 
-    except Exception as e:
-        logger.error("Failed to download ffmpeg: %s", e)
-        if dest_dir.exists():
-            shutil.rmtree(dest_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning("Failed to download ffmpeg from %s: %s", url, e)
+            if dest_dir.exists():
+                shutil.rmtree(dest_dir, ignore_errors=True)
 
     return None
 

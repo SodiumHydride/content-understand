@@ -1,15 +1,15 @@
 import { Activity, Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import type { OperationProgressView } from '../lib/ollamaProgress'
 
 interface OperationProgressCardProps {
   progress: OperationProgressView
-  isZh: boolean
 }
 
 export function OperationProgressCard({
-  progress,
-  isZh
+  progress
 }: OperationProgressCardProps): React.JSX.Element {
+  const { t } = useTranslation()
   const showBar = typeof progress.percent === 'number' || progress.indeterminate
 
   return (
@@ -47,7 +47,7 @@ export function OperationProgressCard({
         {progress.downloaded ? <span>{progress.downloaded}</span> : null}
         {progress.speed ? <span>{progress.speed}</span> : null}
         {progress.eta ? (
-          <span>{isZh ? `剩余 ${progress.eta}` : `ETA ${progress.eta}`}</span>
+          <span>{t('progress.eta', { eta: progress.eta })}</span>
         ) : null}
       </div>
     </div>

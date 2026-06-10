@@ -5,7 +5,8 @@ import { useShallow } from 'zustand/react/shallow'
 import { useTaskStore, type Task } from '../stores/taskStore'
 import { formatSpeed, formatEta } from '../lib/format'
 
-function TaskRow({ task, isZh }: { task: Task; isZh: boolean }): React.JSX.Element {
+function TaskRow({ task }: { task: Task }): React.JSX.Element {
+  const { t } = useTranslation()
   const removeTask = useTaskStore((s) => s.removeTask)
   const dismissTask = useTaskStore((s) => s.dismissTask)
   const isActive = task.status === 'running' || task.status === 'queued'
@@ -51,7 +52,7 @@ function TaskRow({ task, isZh }: { task: Task; isZh: boolean }): React.JSX.Eleme
       {isActive && task.speedBps > 0 ? (
         <span className="text-[10px] text-ink-500">
           {formatSpeed(task.speedBps)}
-          {task.etaSec > 0 ? ` · ${isZh ? '剩余' : 'ETA'} ${formatEta(task.etaSec)}` : ''}
+          {task.etaSec > 0 ? ` · ${t('task.eta')} ${formatEta(task.etaSec)}` : ''}
         </span>
       ) : null}
 
@@ -69,15 +70,7 @@ function TaskRow({ task, isZh }: { task: Task; isZh: boolean }): React.JSX.Eleme
           type="button"
           className="rounded p-0.5 text-ink-500 hover:text-ink-800"
           onClick={() => dismissTask(task.id)}
-          title={
-            canDismissOnly
-              ? isZh
-                ? '隐藏（后台任务继续）'
-                : 'Hide (continues in background)'
-              : isZh
-                ? '取消'
-                : 'Cancel'
-          }
+          title={canDismissOnly ? t('task.hideBackground') : t('task.cancel')}
         >
           <X size={12} />
         </button>
@@ -86,7 +79,7 @@ function TaskRow({ task, isZh }: { task: Task; isZh: boolean }): React.JSX.Eleme
           type="button"
           className="rounded p-0.5 text-ink-500 hover:text-ink-800"
           onClick={() => removeTask(task.id)}
-          title={isZh ? '关闭' : 'Dismiss'}
+          title={t('task.dismiss')}
         >
           <X size={12} />
         </button>
@@ -96,8 +89,7 @@ function TaskRow({ task, isZh }: { task: Task; isZh: boolean }): React.JSX.Eleme
 }
 
 export function TaskBar(): React.JSX.Element | null {
-  const { i18n } = useTranslation()
-  const isZh = i18n.language.startsWith('zh')
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(true)
   const tasks = useTaskStore(useShallow((s) => s.tasks))
   const allTasks = useMemo(() => Object.values(tasks), [tasks])
@@ -129,12 +121,8 @@ export function TaskBar(): React.JSX.Element | null {
             <Loader2 size={11} className="animate-spin text-[var(--color-accent)]" />
           ) : null}
           {activeTasks.length > 0
-            ? isZh
-              ? `${activeTasks.length} 个进行中`
-              : `${activeTasks.length} active`
-            : isZh
-              ? `${recentTasks.length} 个已完成`
-              : `${recentTasks.length} completed`}
+            ? t('task.activeCount', { count: activeTasks.length })
+            : t('task.completedCount', { count: recentTasks.length })}
         </span>
         {expanded ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
       </button>
@@ -142,7 +130,7 @@ export function TaskBar(): React.JSX.Element | null {
       {visibleTasks.length > 0 ? (
         <div className="max-h-32 divide-y divide-[var(--divider)] overflow-y-auto">
           {visibleTasks.map((task) => (
-            <TaskRow key={task.id} task={task} isZh={isZh} />
+            <TaskRow key={task.id} task={task} />
           ))}
         </div>
       ) : null}

@@ -17,6 +17,7 @@ def _mimo_headers(key: str) -> dict[str, str]:
     """MiMo uses 'api-key' header instead of 'Authorization: Bearer'."""
     return {"api-key": key, "Content-Type": "application/json"}
 
+
 _DEFAULT_AUDIO_PROMPT: dict[str, str] = {
     "zh": """请详细分析这段音频，按以下结构输出：
 
@@ -82,7 +83,11 @@ class MimoAudioModel(AudioModel):
 
     def _post(self, body: dict, timeout: int, label: str) -> str:
         return rotate_request(
-            self.api_base, body, self.rotator, timeout, f"mimo-audio:{label}",
+            self.api_base,
+            body,
+            self.rotator,
+            timeout,
+            f"mimo-audio:{label}",
             headers_factory=_mimo_headers,
         )
 

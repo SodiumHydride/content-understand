@@ -16,7 +16,13 @@ def app_data_root() -> Path:
     #   appPaths.ts appends /ContentUnderstand/
     system = platform.system()
     if system == "Darwin":
-        return Path.home() / "Library" / "Application Support" / "content-understand" / "ContentUnderstand"
+        return (
+            Path.home()
+            / "Library"
+            / "Application Support"
+            / "content-understand"
+            / "ContentUnderstand"
+        )
     if system == "Windows":
         return Path.home() / ".content-understand"
     # Linux

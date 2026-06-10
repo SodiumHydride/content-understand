@@ -67,7 +67,10 @@ _AUDIO_BACKENDS: dict[str, tuple[str, str]] = {
 # ── Article backends ────────────────────────────────────────────────
 _ARTICLE_BACKENDS: dict[str, tuple[str, str]] = {
     "mimo": ("content_understand.models.mimo_article", "MimoArticleModel"),
-    "openai_compat": ("content_understand.models.openai_compat_article", "OpenAICompatArticleModel"),
+    "openai_compat": (
+        "content_understand.models.openai_compat_article",
+        "OpenAICompatArticleModel",
+    ),
     "local_server": ("content_understand.models.openai_compat_article", "OpenAICompatArticleModel"),
 }
 
@@ -105,9 +108,7 @@ def create_video_model(backend_name: str, config: BackendConfig) -> VideoModel:
     try:
         cls = _load_class(module_path, class_name)
     except (ImportError, ModuleNotFoundError) as e:
-        raise NotImplementedError(
-            f"Video backend '{backend_name}' not available: {e}"
-        ) from None
+        raise NotImplementedError(f"Video backend '{backend_name}' not available: {e}") from None
     return cls(config)
 
 
@@ -120,9 +121,7 @@ def create_image_model(backend_name: str, config: BackendConfig) -> ImageModel:
     try:
         cls = _load_class(module_path, class_name)
     except (ImportError, ModuleNotFoundError) as e:
-        raise NotImplementedError(
-            f"Image backend '{backend_name}' not available: {e}"
-        ) from None
+        raise NotImplementedError(f"Image backend '{backend_name}' not available: {e}") from None
     return cls(config)
 
 
@@ -135,9 +134,7 @@ def create_audio_model(backend_name: str, config: BackendConfig) -> AudioModel:
     try:
         cls = _load_class(module_path, class_name)
     except (ImportError, ModuleNotFoundError) as e:
-        raise NotImplementedError(
-            f"Audio backend '{backend_name}' not available: {e}"
-        ) from None
+        raise NotImplementedError(f"Audio backend '{backend_name}' not available: {e}") from None
     return cls(config)
 
 
@@ -145,16 +142,12 @@ def create_article_model(backend_name: str, config: BackendConfig) -> ArticleMod
     """Instantiate an ArticleModel by backend name."""
     if backend_name not in _ARTICLE_BACKENDS:
         known = ", ".join(sorted(_ARTICLE_BACKENDS))
-        raise ValueError(
-            f"Unknown article backend '{backend_name}'. Known: {known}"
-        )
+        raise ValueError(f"Unknown article backend '{backend_name}'. Known: {known}")
     module_path, class_name = _ARTICLE_BACKENDS[backend_name]
     try:
         cls = _load_class(module_path, class_name)
     except (ImportError, ModuleNotFoundError) as e:
-        raise NotImplementedError(
-            f"Article backend '{backend_name}' not available: {e}"
-        ) from None
+        raise NotImplementedError(f"Article backend '{backend_name}' not available: {e}") from None
     return cls(config)
 
 
@@ -181,9 +174,7 @@ def create_content_model(backend_name: str, config: BackendConfig) -> ContentMod
 
     # Fallback: try to wrap legacy backends
     known = ", ".join(sorted(_CONTENT_MODELS))
-    raise ValueError(
-        f"Unknown content model backend '{resolved_name}'. Known: {known}"
-    )
+    raise ValueError(f"Unknown content model backend '{resolved_name}'. Known: {known}")
 
 
 def has_content_model(backend_name: str) -> bool:
@@ -223,8 +214,7 @@ def create_model(
     }
     if content_type not in creators:
         raise ValueError(
-            f"Unknown content type '{content_type}'. "
-            f"Known: {', '.join(sorted(creators))}"
+            f"Unknown content type '{content_type}'. Known: {', '.join(sorted(creators))}"
         )
     return creators[content_type](backend_name, config)
 

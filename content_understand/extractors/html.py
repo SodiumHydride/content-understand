@@ -62,7 +62,7 @@ def extract_html(
             with open(input, encoding="utf-8", errors="replace") as f:
                 html_content = f.read()
         except Exception:
-            raise ValueError(f"Cannot read input as HTML: {input[:100]}")
+            raise ValueError(f"Cannot read input as HTML: {input[:100]}") from None
 
     import json as _json
 

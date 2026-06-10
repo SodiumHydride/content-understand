@@ -19,10 +19,9 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
 interface ProviderCardProps {
   provider: ProviderConfig
   onChange: (patch: Partial<ProviderConfig>) => void
-  isZh: boolean
 }
 
-export function ProviderCard({ provider, onChange, isZh }: ProviderCardProps): React.JSX.Element {
+export function ProviderCard({ provider, onChange }: ProviderCardProps): React.JSX.Element {
   const { t } = useTranslation()
   const [loading, setLoading] = React.useState(false)
   const [expanded, setExpanded] = React.useState(provider.enabled)
