@@ -136,19 +136,8 @@ export function NotePreview({
     variant: 'highlighter'
   }), [])
 
-  // Flush any pending auto-save immediately (returns a promise that resolves when done)
-  const flushAutoSave = useCallback((): Promise<boolean> => {
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current)
-      autoSaveTimerRef.current = null
-    }
-    if (dirtyRef.current && detail?.slug) {
-      return performSave(editBody, { silent: true })
-    }
-    return Promise.resolve(true)
-  }, [detail?.slug, editBody, performSave])
-
   // Core save logic — reusable by manual save, auto-save, and flush
+  // NOTE: Must be defined BEFORE flushAutoSave to avoid temporal dead zone
   const performSave = useCallback(async (body: string, { silent = false, exitEdit = false } = {}): Promise<boolean> => {
     if (!detail?.slug) return false
     if (!silent) setSaving(true)
@@ -184,6 +173,18 @@ export function NotePreview({
       if (!silent) setSaving(false)
     }
   }, [detail?.slug, t])
+
+  // Flush any pending auto-save immediately (returns a promise that resolves when done)
+  const flushAutoSave = useCallback((): Promise<boolean> => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current)
+      autoSaveTimerRef.current = null
+    }
+    if (dirtyRef.current && detail?.slug) {
+      return performSave(editBody, { silent: true })
+    }
+    return Promise.resolve(true)
+  }, [detail?.slug, editBody, performSave])
 
   const startEdit = useCallback(() => {
     if (!detail?.body) return
