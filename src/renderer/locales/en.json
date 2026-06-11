@@ -356,6 +356,7 @@
     "downloadAppOllama": "Download app Ollama",
     "connectStart": "Connect / Start",
     "stop": "Stop",
+    "disconnect": "Disconnect",
     "removeAppOllama": "Remove app Ollama",
     "starting": "Starting…",
     "connected": "Connected",

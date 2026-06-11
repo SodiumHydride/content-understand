@@ -293,6 +293,20 @@ export function OllamaPanel({
               {t('ollama.connectStart')}
             </button>
           ) : null}
+          {/* Disconnect: system Ollama is running — stop using it */}
+          {catalog?.running && catalog?.source === 'user' ? (
+            <button
+              type="button"
+              className="settings-btn-secondary flex items-center gap-2"
+              onClick={() => {
+                onUseUserOllamaChange(false)
+                refresh()
+              }}
+            >
+              <Square size={14} />
+              {t('ollama.disconnect', { defaultValue: '断开' })}
+            </button>
+          ) : null}
           {/* Stop: only for app-managed Ollama (not system) */}
           {catalog?.running && catalog?.source === 'app' ? (
             <button
