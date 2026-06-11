@@ -215,6 +215,14 @@ def understand_path(
     _inject_wikilink_context(cfg)
     pipeline = _build_pipeline(cfg, on_progress)
 
+    # Run pre-understand plugin hook (observational)
+    try:
+        from engine.plugins.manager import get_plugin_manager
+        cfg_dict = cfg.model_dump() if hasattr(cfg, 'model_dump') else {}
+        get_plugin_manager().run_pre_understand(str(p), cfg_dict)
+    except Exception as pe:
+        logger.debug("Pre-understand plugin hook failed: %s", pe)
+
     try:
         result = pipeline.understand(
             str(p),
@@ -281,6 +289,15 @@ def understand_url(
     _inject_wikilink_context(cfg)
     _validate_ingest_url(url)
     pipeline = _build_pipeline(cfg, on_progress)
+
+    # Run pre-understand plugin hook (observational)
+    try:
+        from engine.plugins.manager import get_plugin_manager
+        cfg_dict = cfg.model_dump() if hasattr(cfg, 'model_dump') else {}
+        get_plugin_manager().run_pre_understand(url, cfg_dict)
+    except Exception as pe:
+        logger.debug("Pre-understand plugin hook failed: %s", pe)
+
     result = pipeline.understand(url, on_progress=on_progress, output_format=output_format)
 
     # Run post-understand plugins middleware
