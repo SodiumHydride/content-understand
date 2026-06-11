@@ -1,15 +1,7 @@
 """Backend registry — lazy-loads model modules on demand.
 
-Two registry systems coexist:
-
-1. **Unified ContentModel registry** (new): `_CONTENT_MODELS` maps backend names
-   to ContentModel implementations. Used by the new pipeline routing.
-
-2. **Per-modality registries** (legacy): `_VIDEO_BACKENDS`, `_IMAGE_BACKENDS`,
-   `_AUDIO_BACKENDS`, `_ARTICLE_BACKENDS`. Kept for backward compatibility.
-
-New backends (Gemma 4, Qwen2.5-Omni) go in `_CONTENT_MODELS`.
-Old backends are wrapped via adapters in `_CONTENT_MODELS`.
+Single unified registry mapping backend names to ContentModel implementations.
+All backends implement the ContentModel interface with capabilities() support.
 """
 
 from __future__ import annotations
@@ -19,79 +11,41 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from content_understand.config import BackendConfig
-    from content_understand.models.article_base import ArticleModel
-    from content_understand.models.audio_base import AudioModel
-    from content_understand.models.base import ContentModel, VideoModel
-    from content_understand.models.image_base import ImageModel
+    from content_understand.models.base import ContentModel
 
-# ── Unified ContentModel registry (new) ────────────────────────────
-# Maps backend name → (module_path, class_name)
-# These models implement ContentModel with capabilities() support.
-_CONTENT_MODELS: dict[str, tuple[str, str]] = {
-    "gemma4": ("content_understand.models.gemma4", "Gemma4Model"),
-    "qwen_omni": ("content_understand.models.qwen_omni", "QwenOmniModel"),
-    "mimo": ("content_understand.models.mimo_adapter", "MimoAdapter"),
-    "openai_compat": ("content_understand.models.openai_compat_adapter", "OpenAICompatAdapter"),
-    "local_server": ("content_understand.models.openai_compat_adapter", "OpenAICompatAdapter"),
+# ── Unified ContentModel registry ──────────────────────────────────
+# Maps backend name → "module.path.ClassName" for lazy import.
+_MODELS: dict[str, str] = {
+    "gemma4": "content_understand.models.gemma4.Gemma4Model",
+    "qwen_omni": "content_understand.models.qwen_omni.QwenOmniModel",
+    "mimo": "content_understand.models.mimo_unified.MimoUnifiedContentModel",
+    "openai_compat": "content_understand.models.openai_compat_unified.OpenAICompatUnifiedContentModel",
+    "local_server": "content_understand.models.openai_compat_unified.OpenAICompatUnifiedContentModel",
+    "claude": "content_understand.models.claude_image.ClaudeContentModel",
+    "gemini": "content_understand.models.gemini_audio.GeminiAudioModel",
 }
 
-# ── Video backends (legacy) ────────────────────────────────────────
-_VIDEO_BACKENDS: dict[str, tuple[str, str]] = {
-    "mimo": ("content_understand.models.mimo", "MimoModel"),
-    "openai_compat": ("content_understand.models.openai_compat", "OpenAICompatModel"),
-    "local_server": ("content_understand.models.openai_compat", "OpenAICompatModel"),
-}
-
-# ── Image backends ──────────────────────────────────────────────────
-_IMAGE_BACKENDS: dict[str, tuple[str, str]] = {
-    "mimo": ("content_understand.models.mimo_image", "MimoImageModel"),
-    "claude": ("content_understand.models.claude_image", "ClaudeImageModel"),
-    "openai_compat": ("content_understand.models.openai_compat_image", "OpenAICompatImageModel"),
-    "local_server": ("content_understand.models.openai_compat_image", "OpenAICompatImageModel"),
-}
-
-# ── Audio backends ──────────────────────────────────────────────────
-_AUDIO_BACKENDS: dict[str, tuple[str, str]] = {
-    "mimo": ("content_understand.models.mimo_audio", "MimoAudioModel"),
-    "gemini": ("content_understand.models.gemini_audio", "GeminiAudioModel"),
-    "openai_compat": (
-        "content_understand.models.openai_compat_audio",
-        "OpenAICompatAudioModel",
-    ),
-    "local_server": (
-        "content_understand.models.openai_compat_audio",
-        "OpenAICompatAudioModel",
-    ),
-}
-
-# ── Article backends ────────────────────────────────────────────────
-_ARTICLE_BACKENDS: dict[str, tuple[str, str]] = {
-    "mimo": ("content_understand.models.mimo_article", "MimoArticleModel"),
-    "openai_compat": (
-        "content_understand.models.openai_compat_article",
-        "OpenAICompatArticleModel",
-    ),
-    "local_server": ("content_understand.models.openai_compat_article", "OpenAICompatArticleModel"),
-}
+# Model name patterns → backend keys (for model-name-based routing)
+_MODEL_NAME_PATTERNS: list[tuple[str, str]] = [
+    ("gemma4", "gemma4"),
+    ("gemma3", "gemma4"),
+    ("qwen2.5-omni", "qwen_omni"),
+    ("qwen_omni", "qwen_omni"),
+    ("claude", "claude"),
+    ("mimo", "mimo"),
+    ("gemini", "gemini"),
+]
 
 
-def _load_class(module_path: str, class_name: str):
-    """Lazy-import a class from its module path."""
+def _load_class(dotted_path: str):
+    """Lazy-import a class from a dotted module.ClassName path."""
+    module_path, class_name = dotted_path.rsplit(".", 1)
     module = importlib.import_module(module_path)
     return getattr(module, class_name)
 
 
-# Model name patterns → ContentModel backend keys
-_MODEL_NAME_PATTERNS: list[tuple[str, str]] = [
-    ("gemma4", "gemma4"),
-    ("gemma3", "gemma4"),  # Gemma 3 uses same backend as Gemma 4
-    ("qwen2.5-omni", "qwen_omni"),
-    ("qwen_omni", "qwen_omni"),
-]
-
-
 def _resolve_backend_by_model_name(model_name: str) -> str | None:
-    """Resolve a model name (e.g. 'gemma4:12b-it-qat') to a ContentModel backend key."""
+    """Resolve a model name (e.g. 'gemma4:12b-it-qat') to a backend key."""
     lower = model_name.lower()
     for pattern, backend in _MODEL_NAME_PATTERNS:
         if pattern in lower:
@@ -99,138 +53,45 @@ def _resolve_backend_by_model_name(model_name: str) -> str | None:
     return None
 
 
-def create_video_model(backend_name: str, config: BackendConfig) -> VideoModel:
-    """Instantiate a VideoModel by backend name."""
-    if backend_name not in _VIDEO_BACKENDS:
-        known = ", ".join(sorted(_VIDEO_BACKENDS))
-        raise ValueError(f"Unknown video backend '{backend_name}'. Known: {known}")
-    module_path, class_name = _VIDEO_BACKENDS[backend_name]
-    try:
-        cls = _load_class(module_path, class_name)
-    except (ImportError, ModuleNotFoundError) as e:
-        raise NotImplementedError(f"Video backend '{backend_name}' not available: {e}") from None
-    return cls(config)
-
-
-def create_image_model(backend_name: str, config: BackendConfig) -> ImageModel:
-    """Instantiate an ImageModel by backend name."""
-    if backend_name not in _IMAGE_BACKENDS:
-        known = ", ".join(sorted(_IMAGE_BACKENDS))
-        raise ValueError(f"Unknown image backend '{backend_name}'. Known: {known}")
-    module_path, class_name = _IMAGE_BACKENDS[backend_name]
-    try:
-        cls = _load_class(module_path, class_name)
-    except (ImportError, ModuleNotFoundError) as e:
-        raise NotImplementedError(f"Image backend '{backend_name}' not available: {e}") from None
-    return cls(config)
-
-
-def create_audio_model(backend_name: str, config: BackendConfig) -> AudioModel:
-    """Instantiate an AudioModel by backend name."""
-    if backend_name not in _AUDIO_BACKENDS:
-        known = ", ".join(sorted(_AUDIO_BACKENDS))
-        raise ValueError(f"Unknown audio backend '{backend_name}'. Known: {known}")
-    module_path, class_name = _AUDIO_BACKENDS[backend_name]
-    try:
-        cls = _load_class(module_path, class_name)
-    except (ImportError, ModuleNotFoundError) as e:
-        raise NotImplementedError(f"Audio backend '{backend_name}' not available: {e}") from None
-    return cls(config)
-
-
-def create_article_model(backend_name: str, config: BackendConfig) -> ArticleModel:
-    """Instantiate an ArticleModel by backend name."""
-    if backend_name not in _ARTICLE_BACKENDS:
-        known = ", ".join(sorted(_ARTICLE_BACKENDS))
-        raise ValueError(f"Unknown article backend '{backend_name}'. Known: {known}")
-    module_path, class_name = _ARTICLE_BACKENDS[backend_name]
-    try:
-        cls = _load_class(module_path, class_name)
-    except (ImportError, ModuleNotFoundError) as e:
-        raise NotImplementedError(f"Article backend '{backend_name}' not available: {e}") from None
-    return cls(config)
-
-
 def create_content_model(backend_name: str, config: BackendConfig) -> ContentModel:
     """Create a unified ContentModel by backend name.
 
-    This is the preferred way to create models in the new pipeline.
-    Falls back to legacy per-modality models wrapped in adapters.
+    Uses model-name-based routing first (e.g. gemma4 model on local_server),
+    then falls back to backend_name.
     """
-    # Model-name-based routing: if the model name matches a known ContentModel,
-    # use it regardless of backend_name (e.g. gemma4 model on local_server).
     model_name = getattr(config, "model", "") or ""
-    resolved_name = _resolve_backend_by_model_name(model_name) or backend_name
+    resolved = _resolve_backend_by_model_name(model_name) or backend_name
 
-    if resolved_name in _CONTENT_MODELS:
-        module_path, class_name = _CONTENT_MODELS[resolved_name]
-        try:
-            cls = _load_class(module_path, class_name)
-            return cls(config)
-        except (ImportError, ModuleNotFoundError) as e:
-            raise NotImplementedError(
-                f"Content model backend '{resolved_name}' not available: {e}"
-            ) from None
+    if resolved not in _MODELS:
+        known = ", ".join(sorted(_MODELS))
+        raise ValueError(f"Unknown content model backend '{resolved}'. Known: {known}")
 
-    # Fallback: try to wrap legacy backends
-    known = ", ".join(sorted(_CONTENT_MODELS))
-    raise ValueError(f"Unknown content model backend '{resolved_name}'. Known: {known}")
+    try:
+        cls = _load_class(_MODELS[resolved])
+    except (ImportError, ModuleNotFoundError) as e:
+        raise NotImplementedError(f"Content model backend '{resolved}' not available: {e}") from e
+
+    return cls(config)
 
 
 def has_content_model(backend_name: str) -> bool:
     """Check if a backend has a ContentModel implementation."""
-    return backend_name in _CONTENT_MODELS
+    return backend_name in _MODELS
 
 
 def list_content_models() -> list[str]:
     """List all available ContentModel backend names."""
-    return sorted(_CONTENT_MODELS.keys())
-
-
-def create_model(
-    content_type: str,
-    backend_name: str,
-    config: BackendConfig,
-) -> VideoModel | ImageModel | AudioModel | ArticleModel:
-    """Create a model for the given content type.
-
-    Args:
-        content_type: One of "video", "image", "audio", "article".
-        backend_name: Backend identifier (e.g. "mimo", "gemini", "claude").
-        config: BackendConfig with API keys, base URL, model name, etc.
-
-    Returns:
-        A concrete model instance.
-
-    Raises:
-        ValueError: If content_type or backend_name is unknown.
-        NotImplementedError: If the backend module is not installed.
-    """
-    creators = {
-        "video": create_video_model,
-        "image": create_image_model,
-        "audio": create_audio_model,
-        "article": create_article_model,
-    }
-    if content_type not in creators:
-        raise ValueError(
-            f"Unknown content type '{content_type}'. Known: {', '.join(sorted(creators))}"
-        )
-    return creators[content_type](backend_name, config)
+    return sorted(_MODELS.keys())
 
 
 def list_backends(content_type: str | None = None) -> dict[str, list[str]]:
-    """List available backends, optionally filtered by content type.
+    """List available backends.
+
+    Args:
+        content_type: Ignored (all backends are ContentModel now).
+            Kept for backward compatibility.
 
     Returns:
-        Dict mapping content type to list of backend names.
+        Dict with single key "content" mapping to all backend names.
     """
-    all_backends = {
-        "video": list(_VIDEO_BACKENDS.keys()),
-        "image": list(_IMAGE_BACKENDS.keys()),
-        "audio": list(_AUDIO_BACKENDS.keys()),
-        "article": list(_ARTICLE_BACKENDS.keys()),
-    }
-    if content_type:
-        return {content_type: all_backends.get(content_type, [])}
-    return all_backends
+    return {"content": list(_MODELS.keys())}

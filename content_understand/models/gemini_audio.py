@@ -1,18 +1,32 @@
-"""Gemini audio understanding backend — native audio input."""
+"""Gemini audio understanding backend — native audio input.
+
+Rewritten as a ContentModel supporting audio and text modalities.
+Keeps the exact Gemini API call logic (URL format, inline_data, responseMimeType).
+"""
 
 from __future__ import annotations
 
 import base64
+import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from content_understand._keys import KeyRotator, rotate_request
+from content_understand.capabilities import (
+    ContentBundle,
+    Modality,
+    ModelCapabilities,
+)
 from content_understand.defaults import GEMINI_API_BASE, GEMINI_DEFAULT_MODEL
-from content_understand.models.audio_base import AudioModel
+from content_understand.models.base import ContentModel
 
 logger = logging.getLogger(__name__)
 
 _GEMINI_API_BASE = GEMINI_API_BASE
+
+# Gemini native audio: up to 9.5 hours per request
+_MAX_AUDIO_SECONDS: int = 34_200  # 9.5 * 3600
 
 _DEFAULT_AUDIO_PROMPT: dict[str, str] = {
     "zh": """请详细分析这段音频，按以下结构输出：
@@ -77,17 +91,108 @@ def _gemini_headers(key: str) -> dict[str, str]:
     }
 
 
-class GeminiAudioModel(AudioModel):
+class GeminiAudioModel(ContentModel):
     """Gemini audio understanding via native audio API.
 
     Supports direct audio file input (up to 9.5 hours per request).
+    Accepts AUDIO and TEXT modalities.
     """
 
-    def __init__(self, config) -> None:
+    def __init__(self, config: Any) -> None:
         self.rotator = KeyRotator(config.api_keys or [])
-        self.model_name = config.audio_model or GEMINI_DEFAULT_MODEL
+        self.model_name = config.audio_model or config.model or GEMINI_DEFAULT_MODEL
+        self.max_tokens = config.max_tokens or 8192
         self.timeout = config.timeout or 300
         self._url_factory = _gemini_url_factory(self.model_name)
+
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(
+            accepts=Modality.AUDIO | Modality.TEXT,
+            preferred_input=Modality.AUDIO,
+            max_audio_seconds=_MAX_AUDIO_SECONDS,
+            supports_url_input=False,
+            supports_base64_input=True,
+            supports_native_video=False,
+        )
+
+    def understand(
+        self,
+        bundle: ContentBundle,
+        prompt: str = "",
+        timeout: int = 120,
+        language: str = "zh",
+        frame_config: Any | None = None,
+        output_format: str = "text",
+        json_schema: dict | None = None,
+    ) -> str | dict:
+        if bundle.has_audio:
+            return self._understand_audio(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
+        if bundle.has_text:
+            return self._understand_text(
+                bundle, prompt, timeout, language, output_format, json_schema
+            )
+        raise ValueError(
+            "GeminiAudioModel requires audio or text in the ContentBundle; "
+            f"got content_type={bundle.content_type!r}"
+        )
+
+    # ── Internal dispatch ──────────────────────────────────────────
+
+    def _understand_audio(
+        self,
+        bundle: ContentBundle,
+        prompt: str,
+        timeout: int,
+        language: str,
+        output_format: str,
+        json_schema: dict | None,
+    ) -> str | dict:
+        audio_path = bundle.audio_path or bundle.local_path
+        if not audio_path:
+            raise ValueError("ContentBundle has_audio but no audio_path set")
+
+        if not prompt:
+            prompt = _DEFAULT_AUDIO_PROMPT.get(language, _DEFAULT_AUDIO_PROMPT["zh"])
+
+        audio_b64 = _encode_audio(audio_path)
+        mime = _guess_mime(audio_path)
+
+        parts = [
+            {"inline_data": {"mime_type": mime, "data": audio_b64}},
+            {"text": prompt},
+        ]
+
+        return self._call_gemini(
+            parts, timeout or self.timeout, "understand", output_format, json_schema
+        )
+
+    def _understand_text(
+        self,
+        bundle: ContentBundle,
+        prompt: str,
+        timeout: int,
+        language: str,
+        output_format: str,
+        json_schema: dict | None,
+    ) -> str | dict:
+        text = bundle.text or ""
+        if not text.strip():
+            raise ValueError("ContentBundle has_text but text is empty")
+
+        user_prompt = prompt or text
+        # If prompt is custom, prepend the bundle text as context
+        if prompt and text:
+            user_prompt = f"{text}\n\n---\n\n{prompt}"
+
+        parts = [{"text": user_prompt}]
+
+        return self._call_gemini(
+            parts, timeout or self.timeout, "text", output_format, json_schema
+        )
+
+    # ── Gemini API call (preserved from original) ──────────────────
 
     def _call_gemini(
         self,
@@ -97,7 +202,7 @@ class GeminiAudioModel(AudioModel):
         output_format: str = "text",
         json_schema: dict | None = None,
     ) -> str | dict:
-        gen_config: dict = {"maxOutputTokens": 8192}
+        gen_config: dict = {"maxOutputTokens": self.max_tokens}
 
         # Structured output: Gemini uses responseMimeType + responseSchema
         if output_format == "json":
@@ -121,57 +226,12 @@ class GeminiAudioModel(AudioModel):
 
         # Parse JSON if structured output was requested
         if output_format == "json":
-            import json
-
             try:
                 return json.loads(result)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError):
                 return result
 
         return result
-
-    def understand_audio(
-        self,
-        audio_path: str,
-        prompt: str = "",
-        timeout: int = 300,
-        language: str = "zh",
-        output_format: str = "text",
-        json_schema: dict | None = None,
-    ) -> str | dict:
-        if not prompt:
-            prompt = _DEFAULT_AUDIO_PROMPT.get(language, _DEFAULT_AUDIO_PROMPT["zh"])
-
-        audio_b64 = _encode_audio(audio_path)
-        mime = _guess_mime(audio_path)
-
-        parts = [
-            {"inline_data": {"mime_type": mime, "data": audio_b64}},
-            {"text": prompt},
-        ]
-
-        return self._call_gemini(
-            parts, timeout or self.timeout, "understand", output_format, json_schema
-        )
-
-    def transcribe_audio(
-        self,
-        audio_path: str,
-        language: str = "zh",
-        timeout: int = 300,
-    ) -> str:
-        lang_hint = "中文" if language.startswith("zh") else "English"
-        prompt = f"请将这段音频转录为文字（{lang_hint}）。只输出转录文本，不要添加任何分析或总结。"
-
-        audio_b64 = _encode_audio(audio_path)
-        mime = _guess_mime(audio_path)
-
-        parts = [
-            {"inline_data": {"mime_type": mime, "data": audio_b64}},
-            {"text": prompt},
-        ]
-
-        return self._call_gemini(parts, timeout or self.timeout, "transcribe")
 
 
 def _encode_audio(path: str) -> str:

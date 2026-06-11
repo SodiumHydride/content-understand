@@ -739,6 +739,10 @@ class Gemma4Model(ContentModel):
         for item in content:
             if item.get("type") == "image_url":
                 url_data = item["image_url"]["url"]
+                # Skip audio data URIs — only Gemma 4 natively supports audio;
+                # smaller models (Gemma 3, etc.) reject non-image data in the images array.
+                if url_data.startswith("data:audio/"):
+                    continue
                 # Extract base64 data from data URI
                 if url_data.startswith("data:"):
                     b64 = url_data.split(",", 1)[1] if "," in url_data else url_data
