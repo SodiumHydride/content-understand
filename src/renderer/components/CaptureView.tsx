@@ -287,7 +287,7 @@ export function CaptureView(): React.JSX.Element {
                         <span className="capture-recent-dot" style={{ background: accent }} aria-hidden />
                         <span className="capture-recent-title">{item.title}</span>
                         <span className="capture-recent-time">
-                          {dayjs(item.updated).locale(locale).fromNow()}
+                          {item.updated ? dayjs(item.updated).locale(locale).fromNow() : ''}
                         </span>
                       </button>
                     </li>

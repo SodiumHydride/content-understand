@@ -52,7 +52,7 @@ export function LibraryCard({
         <span aria-hidden>·</span>
         <span>{t(`nav.${type}`)}</span>
         <span aria-hidden>·</span>
-        <span>{dayjs(item.updated).locale(locale).fromNow()}</span>
+        <span>{item.updated ? dayjs(item.updated).locale(locale).fromNow() : ''}</span>
       </div>
       {showPath && <div className="lib-card-path">{item.path}</div>}
     </button>
