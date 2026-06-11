@@ -1,13 +1,32 @@
-import collections
-import json
-import math
-import re
-import jieba
-from typing import Any, Dict, List
+"""Smart note recommendations using FTS5 BM25 scoring.
 
-def get_recommendations(conn, slug: str, limit: int = 5) -> List[Dict[str, Any]]:
-    """Calculate smart note recommendation links based on TF-IDF text similarity,
-    shared tags, and direct title mentions.
+Computes similarity entirely inside SQLite's C engine via bm25(),
+then applies lightweight post-processing boosts (shared tags,
+title mentions) in Python.  Zero full-text loading into memory.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+from typing import Any
+
+from engine.index.db import sanitize_fts5
+
+logger = logging.getLogger(__name__)
+
+# Weight constants for the composite score
+_BM25_WEIGHT = 1.0
+_TAG_BOOST = 0.15   # per shared tag
+_TITLE_MENTION_BOOST = 0.35
+
+
+def get_recommendations(conn: sqlite3.Connection, slug: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Calculate note recommendations based on FTS5 BM25 similarity.
+
+    Returns up to *limit* dicts with keys: slug, title, score, reason.
+    Excludes pages that are already linked to *slug* in either direction.
     """
     # 1. Fetch the target page
     target = conn.execute(
@@ -15,113 +34,97 @@ def get_recommendations(conn, slug: str, limit: int = 5) -> List[Dict[str, Any]]
     ).fetchone()
     if not target:
         return []
-    
+
     target_slug, target_title, target_body, target_tags_json = target
     try:
-        target_tags = set(json.loads(target_tags_json))
+        target_tags: set[str] = set(json.loads(target_tags_json))
     except Exception:
         target_tags = set()
-        
-    # 2. Fetch all other pages
-    all_pages = conn.execute(
-        "SELECT slug, title, body, tags FROM pages WHERE slug != ?", (slug,)
-    ).fetchall()
-    if not all_pages:
+
+    # 2. Build BM25 query from the target title
+    if not target_title.strip():
         return []
-        
-    # Tokenize helper
-    def tokenize(text: str) -> List[str]:
-        # Clean markdown characters
-        clean = re.sub(r'[#\-\*\[\]\(\)\`\n\r\t]', ' ', text)
-        words = jieba.cut(clean)
-        return [w.strip() for w in words if len(w.strip()) > 1]
-        
-    # Tokenize all pages
-    doc_tokens = {}
-    doc_tags = {}
-    doc_titles = {}
-    
-    # Target doc tokens
-    target_tokens = tokenize(target_title + " " + target_body)
-    target_tf = collections.Counter(target_tokens)
-    
-    for row in all_pages:
-        p_slug, p_title, p_body, p_tags_json = row
-        p_text = p_title + " " + p_body
-        tokens = tokenize(p_text)
-        doc_tokens[p_slug] = tokens
-        doc_titles[p_slug] = p_title
+
+    safe_query = sanitize_fts5(target_title)
+
+    # 3. Retrieve BM25-scored candidates from FTS5
+    #    bm25() returns negative values — lower (more negative) = better match.
+    #    Column weights: title (col 0) weighted 5x, summary (col 1) 1x, body (col 2) 1x.
+    try:
+        rows = conn.execute(
+            """
+            SELECT p.slug, p.title, p.tags,
+                   bm25(pages_fts, 5.0, 1.0, 1.0, 1.0) AS bm25_score
+            FROM pages_fts
+            JOIN pages p ON p.rowid = pages_fts.rowid
+            WHERE pages_fts MATCH ?
+              AND p.slug != ?
+            ORDER BY bm25_score
+            LIMIT ?
+            """,
+            (safe_query, slug, limit * 4),
+        ).fetchall()
+    except Exception:
+        logger.debug("FTS5 BM25 query failed for slug=%s", slug, exc_info=True)
+        return []
+
+    if not rows:
+        return []
+
+    # 4. Build set of already-linked slugs (to exclude)
+    linked: set[str] = set()
+    link_rows = conn.execute(
+        "SELECT target_slug FROM links WHERE source_slug = ?"
+        " UNION "
+        "SELECT source_slug FROM links WHERE target_slug = ?",
+        (slug, slug),
+    ).fetchall()
+    for r in link_rows:
+        linked.add(r[0])
+
+    # 5. Post-process: apply tag boost and title-mention boost
+    recommendations: list[dict[str, Any]] = []
+    target_body_lower = target_body.lower()
+    target_title_lower = target_title.lower()
+
+    for row in rows:
+        p_slug = row[0]
+        p_title = row[1]
+        p_tags_json = row[2]
+        bm25_raw = row[3]
+
+        if p_slug in linked:
+            continue
+
+        # Normalize BM25 score to a positive similarity value
+        score = abs(bm25_raw) * _BM25_WEIGHT
+
+        # Tag boost
         try:
-            doc_tags[p_slug] = set(json.loads(p_tags_json))
+            p_tags: set[str] = set(json.loads(p_tags_json))
         except Exception:
-            doc_tags[p_slug] = set()
-            
-    # Calculate IDF
-    all_slugs = list(doc_tokens.keys())
-    num_docs = len(all_slugs) + 1  # include target doc
-    
-    vocab = set(target_tokens)
-    for tokens in doc_tokens.values():
-        vocab.update(tokens)
-        
-    doc_freq = collections.defaultdict(int)
-    # Count document frequency
-    for w in target_tf:
-        doc_freq[w] += 1
-    for tokens in doc_tokens.values():
-        for w in set(tokens):
-            doc_freq[w] += 1
-            
-    idf = {}
-    for w in vocab:
-        idf[w] = math.log((num_docs + 1) / (doc_freq[w] + 1)) + 1
-        
-    # TF-IDF vector for target
-    target_vector = {w: tf * idf[w] for w, tf in target_tf.items()}
-    target_norm = math.sqrt(sum(v*v for v in target_vector.values()))
-    
-    recommendations = []
-    
-    for p_slug in all_slugs:
-        tokens = doc_tokens[p_slug]
-        p_tf = collections.Counter(tokens)
-        p_vector = {w: tf * idf[w] for w, tf in p_tf.items() if w in target_vector}
-        
-        # Cosine similarity
-        dot_product = sum(target_vector[w] * p_vector.get(w, 0) for w in target_vector)
-        p_norm = math.sqrt(sum((tf * idf[w])**2 for w, tf in p_tf.items()))
-        
-        sim = 0.0
-        if target_norm > 0 and p_norm > 0:
-            sim = dot_product / (target_norm * p_norm)
-            
-        # Additional weights
-        # A. Shared tags bonus (+0.15 per shared tag)
-        shared_tags = target_tags.intersection(doc_tags[p_slug])
-        sim += 0.15 * len(shared_tags)
-        
-        # B. Direct title mention bonus (+0.3 if other title appears in target body, or vice versa)
-        p_title = doc_titles[p_slug]
+            p_tags = set()
+        shared = target_tags & p_tags
+        score += _TAG_BOOST * len(shared)
+
+        # Title-mention boost
+        reason = "similarity"
         if len(p_title) > 1:
-            if p_title.lower() in target_body.lower():
-                sim += 0.35
-            if target_title.lower() in p_body.lower():
-                sim += 0.35
-                
-        # C. Filter out if already linked
-        already_linked = conn.execute(
-            "SELECT 1 FROM links WHERE (source_slug = ? AND target_slug = ?) OR (source_slug = ? AND target_slug = ?)",
-            (slug, p_slug, p_slug, slug)
-        ).fetchone()
-        
-        if not already_linked and sim > 0:
-            recommendations.append({
-                "slug": p_slug,
-                "title": p_title,
-                "score": sim,
-                "reason": "tag" if shared_tags else "similarity"
-            })
-            
-    # Sort by score desc
+            if p_title.lower() in target_body_lower:
+                score += _TITLE_MENTION_BOOST
+                reason = "mention"
+            if target_title_lower in p_title.lower():
+                score += _TITLE_MENTION_BOOST
+
+        if shared:
+            reason = "tag"
+
+        recommendations.append({
+            "slug": p_slug,
+            "title": p_title,
+            "score": round(score, 4),
+            "reason": reason,
+        })
+
     recommendations.sort(key=lambda x: x["score"], reverse=True)
     return recommendations[:limit]
