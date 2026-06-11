@@ -22,6 +22,8 @@ from typing import Any
 
 import jieba
 
+from engine.index.db import sanitize_fts5
+
 # ── Query parser ──────────────────────────────────────────────────────
 
 # Matches key:value tokens.  Key is one of the known filter names.
@@ -116,30 +118,29 @@ def _build_fts_match(
     free_text: str,
     exact_phrases: list[str],
 ) -> tuple[str, list[str]]:
-    """Build the FTS5 MATCH expression and its bind parameters.
+    """Build the FTS5 MATCH expression and its bind parameter.
 
-    Returns (match_clause, params).  The clause is the content inside
-    ``pages_fts MATCH ?`` — i.e. just the expression, no column filter.
+    Returns (match_expr, [match_expr]) so the caller can bind it to a
+    single ``pages_fts MATCH ?`` placeholder.  The expression itself is
+    already sanitised by :func:`sanitize_fts5`.
     """
     parts: list[str] = []
-    params: list[str] = []
 
     if free_text:
-        # Tokenise with jieba for better CJK matching
-        tokens = " ".join(jieba.cut(free_text))
-        parts.append(tokens)
-        params.append(tokens)
+        # Tokenise with jieba for CJK, then sanitize each token for FTS5
+        raw_tokens = jieba.cut(free_text)
+        sanitized = " ".join(sanitize_fts5(t) for t in raw_tokens if t.strip())
+        parts.append(sanitized)
 
     for phrase in exact_phrases:
-        parts.append('"' + phrase.replace('"', '""') + '"')
-        params.append(phrase)
+        parts.append(sanitize_fts5(phrase))
 
     if not parts:
         return "", []
 
     # FTS5 OR across free text + each phrase
     match_expr = " OR ".join(parts)
-    return match_expr, params
+    return match_expr, [match_expr]
 
 
 def advanced_search(

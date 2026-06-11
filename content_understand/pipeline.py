@@ -13,13 +13,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from content_understand.capabilities import ContentBundle
 from content_understand.config import ContentConfig
 from content_understand.models.registry import (
-    create_article_model,
-    create_audio_model,
     create_content_model,
-    create_image_model,
-    create_video_model,
     has_content_model,
 )
 from content_understand.preprocessing import ContentPreprocessor, FrameConfig
@@ -161,8 +158,12 @@ def _detect_content_type(path: str) -> str:
     return "unknown"
 
 
-def _extract_tags(text: str) -> list[str]:
-    """Extract hashtags from text."""
+def _extract_tags(text) -> list[str]:
+    """Extract hashtags from text. Accepts str or dict (JSON output)."""
+    if isinstance(text, dict):
+        text = text.get("summary", "") or text.get("detailed_content", "") or json.dumps(text, ensure_ascii=False)
+    if not isinstance(text, str):
+        text = str(text)
     tags = re.findall(r"#([\w一-鿿][\w一-鿿_-]*)", text)
     seen: set[str] = set()
     result = []
@@ -351,15 +352,14 @@ class ContentPipeline:
     ) -> dict[str, Any]:
         """Route to the correct model backend based on content type.
 
-        Uses the new ContentModel system when available, falls back to
-        legacy per-modality models for backward compatibility.
+        Uses the ContentModel system exclusively — no legacy fallback.
         """
         local_path = resolve_result.local_path
-        backend_name, backend_config = self.config.backend_for_content_type(content_type)
-
         if content_type == "unknown":
             logger.warning("Unknown content type for %s, attempting article extraction", local_path)
             content_type = "article"
+
+        backend_name, backend_config = self.config.backend_for_content_type(content_type)
 
         # Prompt: base default + optional user/template suffix
         lang = getattr(self.config, "output_language", "zh") or "zh"
@@ -380,61 +380,22 @@ class ContentPipeline:
             url = resolve_result.original_url
             effective_prompt = effective_prompt.format(title=title, url=url, text=text)
 
-        # Try new ContentModel path first
-        if has_content_model(backend_name):
-            try:
-                return self._understand_with_content_model(
-                    resolve_result,
-                    content_type,
-                    backend_name,
-                    backend_config,
-                    effective_prompt,
-                    on_progress,
-                    lang,
-                    output_format=output_format,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "ContentModel '%s' failed for %s (%s), falling back to legacy",
-                    backend_name,
-                    content_type,
-                    exc,
-                )
+        if not has_content_model(backend_name):
+            raise ValueError(
+                f"No ContentModel registered for backend '{backend_name}'. "
+                f"Install a backend that provides a ContentModel implementation."
+            )
 
-        # Legacy per-modality path
-        try:
-            if content_type == "video":
-                return self._understand_video(
-                    local_path,
-                    backend_name,
-                    backend_config,
-                    effective_prompt,
-                    on_progress,
-                    lang,
-                    resolve_result=resolve_result,
-                )
-            elif content_type == "image":
-                return self._understand_image(
-                    local_path, backend_name, backend_config, effective_prompt, on_progress, lang
-                )
-            elif content_type == "audio":
-                return self._understand_audio(
-                    local_path, backend_name, backend_config, effective_prompt, on_progress, lang
-                )
-            else:  # article
-                return self._understand_article(
-                    local_path, resolve_result, backend_name, backend_config, effective_prompt, on_progress, lang
-                )
-        except (NotImplementedError, ValueError, ConnectionError, TimeoutError, OSError) as exc:
-            logger.warning(
-                "Backend '%s' doesn't support %s (%s), falling back to article",
-                backend_name,
-                content_type,
-                exc,
-            )
-            return self._understand_article(
-                local_path, resolve_result, backend_name, backend_config, effective_prompt, on_progress, lang
-            )
+        return self._understand_with_content_model(
+            resolve_result,
+            content_type,
+            backend_name,
+            backend_config,
+            effective_prompt,
+            on_progress,
+            lang,
+            output_format=output_format,
+        )
 
     def _understand_with_content_model(
         self,
@@ -502,7 +463,7 @@ class ContentPipeline:
 
         # Map-Reduce: chunked video understanding for long videos
         # Skip if model handles segmentation internally (e.g. Gemma4)
-        caps = model.capabilities() if hasattr(model, "capabilities") else None
+        caps = model.capabilities()
         model_handles_own_segments = caps and caps.supports_native_video
         if (
             content_type == "video"
@@ -636,9 +597,21 @@ class ContentPipeline:
 
             content.append({"type": "text", "text": chunk_prompt})
 
-            # Call model directly via the chat method
+            # Call model via the ContentModel interface
             try:
-                result = model._chat(content, config.timeout, "text", None)
+                chunk_bundle = ContentBundle(
+                    images=[ft.path for ft in chunk_frames],
+                    text="\n".join(
+                        c["text"] for c in content if c.get("type") == "text"
+                    ),
+                    content_type="video",
+                )
+                result = model.understand(
+                    chunk_bundle,
+                    prompt=chunk_prompt,
+                    timeout=config.timeout,
+                    language=language,
+                )
                 return idx, result
             except Exception as e:
                 logger.warning("Chunk %d (%s) failed: %s", idx, chunk.mmss_range, e)
@@ -670,7 +643,8 @@ class ContentPipeline:
 
         Extracts structured sections from each chunk and assembles them.
         """
-        import re as re_mod
+
+
 
         # Collect all sections from all chunks
         all_timelines = []
@@ -684,8 +658,8 @@ class ContentPipeline:
                 continue
 
             # Extract timeline entries
-            tl_match = re_mod.search(
-                r"#+\s*(?:时间线|Timeline)\s*\n(.*?)(?=\n#|\Z)", result, re_mod.DOTALL
+            tl_match = re.search(
+                r"#+\s*(?:时间线|Timeline)\s*\n(.*?)(?=\n#|\Z)", result, re.DOTALL
             )
             if tl_match:
                 entries = [
@@ -696,8 +670,8 @@ class ContentPipeline:
                 all_timelines.extend(entries)
 
             # Extract key scenes
-            scene_match = re_mod.search(
-                r"#+\s*(?:关键场景|Key Scene)[^\n]*\n(.*?)(?=\n#|\Z)", result, re_mod.DOTALL
+            scene_match = re.search(
+                r"#+\s*(?:关键场景|Key Scene)[^\n]*\n(.*?)(?=\n#|\Z)", result, re.DOTALL
             )
             if scene_match:
                 entries = [
@@ -707,14 +681,14 @@ class ContentPipeline:
                     and (
                         line.strip().startswith("-")
                         or line.strip().startswith("*")
-                        or re_mod.match(r"^\d+\.", line.strip())
+                        or re.match(r"^\d+\.", line.strip())
                     )
                 ]
                 all_scenes.extend(entries)
 
             # Extract key points
-            points_match = re_mod.search(
-                r"#+\s*(?:要点|Key Point)[^\n]*\n(.*?)(?=\n#|\Z)", result, re_mod.DOTALL
+            points_match = re.search(
+                r"#+\s*(?:要点|Key Point)[^\n]*\n(.*?)(?=\n#|\Z)", result, re.DOTALL
             )
             if points_match:
                 entries = [
@@ -724,18 +698,18 @@ class ContentPipeline:
                     and (
                         line.strip().startswith("-")
                         or line.strip().startswith("*")
-                        or re_mod.match(r"^\d+\.", line.strip())
+                        or re.match(r"^\d+\.", line.strip())
                     )
                 ]
                 all_points.extend(entries)
 
             # Extract tags
-            tags = re_mod.findall(r"#([\w一-鿿][\w一-鿿_-]*)", result)
+            tags = re.findall(r"#([\w一-鿿][\w一-鿿_-]*)", result)
             all_tags.extend(tags)
 
             # Extract summary (first paragraph or ## 摘要 section)
-            sum_match = re_mod.search(
-                r"#+\s*(?:摘要|Summary)\s*\n(.*?)(?=\n#|\Z)", result, re_mod.DOTALL
+            sum_match = re.search(
+                r"#+\s*(?:摘要|Summary)\s*\n(.*?)(?=\n#|\Z)", result, re.DOTALL
             )
             if sum_match:
                 summaries.append(sum_match.group(1).strip()[:500])
@@ -780,160 +754,6 @@ class ContentPipeline:
             "summary": merged_summary,
             "tags": unique_tags[:15],
         }
-
-    def _understand_video(
-        self,
-        path: str,
-        backend_name: str,
-        config,
-        prompt: str,
-        on_progress: ProgressFn | None,
-        language: str = "zh",
-        resolve_result: ResolveResult | None = None,
-    ) -> dict[str, Any]:
-        model = create_video_model(backend_name, config)
-
-        # Prepend video metadata to prompt (like MiMo system does)
-        if resolve_result and resolve_result.metadata:
-            meta = resolve_result.metadata
-            title = meta.get("title", "")
-            author = meta.get("author", "")
-            duration = meta.get("duration", "")
-            platform = meta.get("platform", "")
-            if title or author or duration:
-                context_parts = []
-                if title:
-                    context_parts.append(f"标题：{title}")
-                if author:
-                    context_parts.append(f"作者：{author}")
-                if duration:
-                    context_parts.append(f"时长：{duration}")
-                if platform:
-                    context_parts.append(f"平台：{platform}")
-                context_line = "（".join(context_parts) + "）" if context_parts else ""
-                if context_line:
-                    prompt = f"视频{context_line}\n\n{prompt}"
-
-        if on_progress:
-            on_progress("model", 50, f"Analyzing video with {backend_name}...")
-
-        # Try URL mode first if supported
-        video_url = None
-        if model.supports_video_url() and path.startswith("http"):
-            video_url = path
-
-        summary = model.understand_video(
-            video_path=path if not video_url else None,
-            video_url=video_url,
-            prompt=prompt,
-            fps=config.extra.get("fps", 2.0),
-            timeout=config.timeout,
-            language=language,
-        )
-
-        if on_progress:
-            on_progress("model", 90, "Video analysis complete")
-
-        return {"summary": summary, "tags": _extract_tags(summary)}
-
-    def _understand_image(
-        self,
-        path: str,
-        backend_name: str,
-        config,
-        prompt: str,
-        on_progress: ProgressFn | None = None,
-        language: str = "zh",
-    ) -> dict[str, Any]:
-        model = create_image_model(backend_name, config)
-
-        image_url = None
-        if model.supports_image_url() and path.startswith("http"):
-            image_url = path
-
-        if on_progress:
-            on_progress("model", 50, f"Analyzing image with {backend_name}...")
-
-        summary = model.understand_image(
-            image_path=path if not image_url else None,
-            image_url=image_url,
-            prompt=prompt,
-            timeout=config.timeout,
-            language=language,
-        )
-
-        if on_progress:
-            on_progress("model", 60, "Image analysis complete")
-
-        return {"summary": summary, "tags": _extract_tags(summary)}
-
-    def _understand_audio(
-        self,
-        path: str,
-        backend_name: str,
-        config,
-        prompt: str,
-        on_progress: ProgressFn | None = None,
-        language: str = "zh",
-    ) -> dict[str, Any]:
-        model = create_audio_model(backend_name, config)
-
-        if on_progress:
-            on_progress("model", 50, f"Analyzing audio with {backend_name}...")
-
-        summary = model.understand_audio(
-            audio_path=path,
-            prompt=prompt,
-            timeout=config.timeout,
-            language=language,
-        )
-
-        if on_progress:
-            on_progress("model", 60, "Audio analysis complete")
-
-        return {"summary": summary, "tags": _extract_tags(summary)}
-
-    def _understand_article(
-        self,
-        path: str,
-        resolve_result: ResolveResult,
-        backend_name: str,
-        config,
-        prompt: str,
-        on_progress: ProgressFn | None = None,
-        language: str = "zh",
-    ) -> dict[str, Any]:
-        # Extract text from the content
-        text = self._extract_text(path, resolve_result)
-        if not text:
-            msg = "无法提取文本内容。" if language == "zh" else "Could not extract text content."
-            return {"summary": msg, "tags": []}
-
-        if on_progress:
-            on_progress("model", 50, "Text extracted, preparing model...")
-
-        model = create_article_model(backend_name, config)
-
-        title = resolve_result.metadata.get("title", "")
-        url = resolve_result.original_url
-
-        # Format template variables if prompt contains them
-        if prompt and ("{text}" in prompt or "{title}" in prompt):
-            prompt = prompt.format(title=title, url=url, text=text)
-
-        if on_progress:
-            on_progress("model", 60, f"Analyzing article with {backend_name}...")
-
-        summary = model.understand_article(
-            text=text,
-            title=title,
-            url=url,
-            prompt=prompt,
-            timeout=config.timeout,
-            language=language,
-        )
-
-        return {"summary": summary, "tags": _extract_tags(summary)}
 
     def _extract_text(self, path: str, resolve_result: ResolveResult) -> str:
         """Extract text from a file based on its content type."""

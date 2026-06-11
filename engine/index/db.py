@@ -11,6 +11,22 @@ import threading
 from pathlib import Path
 from typing import Any
 
+def sanitize_fts5(user_input: str) -> str:
+    """Escape user input for safe use in an FTS5 MATCH expression.
+
+    Wraps the input as a literal phrase so that special characters
+    (+, -, *, AND, OR, NOT, NEAR, (, ), :, ^) are not interpreted
+    as FTS5 operators.  Embedded double-quotes are doubled per the
+    FTS5 spec.
+
+    This does NOT protect against SQL injection — always use
+    parameter binding (?) for the MATCH value.
+    """
+    s = user_input.replace("\x00", "")
+    s = s.replace('"', '""')
+    return f'"{s}"'
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pages (
     slug TEXT PRIMARY KEY,
@@ -130,22 +146,22 @@ def close_db() -> None:
         _connections.clear()
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """Check whether *column* exists in *table* using PRAGMA table_info."""
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    return column in cols
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Apply incremental migrations for existing databases."""
-    try:
-        conn.execute("SELECT body FROM pages LIMIT 1")
-    except sqlite3.OperationalError:
+    if not _column_exists(conn, "pages", "body"):
         conn.execute("ALTER TABLE pages ADD COLUMN body TEXT NOT NULL DEFAULT ''")
-    
-    # Migrate links table for link_type and created_at
-    try:
-        conn.execute("SELECT link_type FROM links LIMIT 1")
-    except sqlite3.OperationalError:
-        try:
-            conn.execute("ALTER TABLE links ADD COLUMN link_type TEXT DEFAULT 'wikilink'")
-            conn.execute("ALTER TABLE links ADD COLUMN created_at REAL DEFAULT (julianday('now'))")
-        except sqlite3.OperationalError:
-            pass
+
+    if not _column_exists(conn, "links", "link_type"):
+        conn.execute("ALTER TABLE links ADD COLUMN link_type TEXT DEFAULT 'wikilink'")
+    if not _column_exists(conn, "links", "created_at"):
+        conn.execute("ALTER TABLE links ADD COLUMN created_at REAL DEFAULT 0")
+
     conn.commit()
 
 
@@ -156,7 +172,7 @@ def fts_rebuild(conn: sqlite3.Connection) -> None:
 
 def fts_search(conn: sqlite3.Connection, query: str, limit: int = 20) -> list[dict[str, Any]]:
     """Full-text search with snippet highlights."""
-    safe_query = query.replace('"', '""')
+    safe_query = sanitize_fts5(query)
     rows = conn.execute(
         """
         SELECT p.slug, p.title, p.type, p.summary,

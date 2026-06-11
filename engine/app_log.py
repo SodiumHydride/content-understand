@@ -43,6 +43,7 @@ class _RingHandler(logging.Handler):
             try:
                 sys.stderr.write(f"[RingHandler] emit failed: {record}\n")
             except Exception:
+                # Cannot log — logging itself failed. Last resort: swallow silently.
                 pass
 
 

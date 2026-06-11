@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import janus
+import logging
+
+logger = logging.getLogger(__name__)
 
 _queues: dict[str, janus.Queue] = {}
 
@@ -23,7 +26,7 @@ def remove_job_queue(job_id: str) -> None:
         try:
             q.shutdown(immediate=True)
         except Exception:
-            pass
+            logger.debug("Queue shutdown failed for job %s (may already be closed)", job_id)
 
 
 def shutdown_all() -> None:
@@ -32,7 +35,7 @@ def shutdown_all() -> None:
         try:
             q.shutdown(immediate=True)
         except Exception:
-            pass
+            logger.debug("Queue shutdown failed during cleanup (may already be closed)")
     _queues.clear()
 
 
@@ -43,7 +46,7 @@ def emit_progress(job_id: str, event: str, data: str) -> None:
     try:
         q.sync_q.put_nowait({"event": event, "data": data})
     except Exception:
-        pass
+        logger.debug("emit_progress failed for job %s (queue may be shut down)", job_id)
 
 
 def emit_done(job_id: str) -> None:
@@ -53,4 +56,4 @@ def emit_done(job_id: str) -> None:
     try:
         q.sync_q.put_nowait(None)
     except Exception:
-        pass
+        logger.debug("emit_done failed for job %s (queue may be shut down)", job_id)

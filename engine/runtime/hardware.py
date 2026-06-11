@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import platform
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -77,7 +80,7 @@ def _ram_gb() -> float:
             out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip()
             return int(out) / (1024**3)
         except Exception:
-            pass
+            logger.debug("sysctl hw.memsize failed, using default RAM estimate", exc_info=True)
     if platform.system() == "Linux":
         try:
             with open("/proc/meminfo", encoding="utf-8") as f:
@@ -86,7 +89,7 @@ def _ram_gb() -> float:
                         kb = int(line.split()[1])
                         return kb / (1024**2)
         except Exception:
-            pass
+            logger.debug("/proc/meminfo parsing failed, using default RAM estimate", exc_info=True)
     return 8.0
 
 
@@ -148,5 +151,5 @@ def _amd_vram() -> float:
                     # Assume GB
                     return val
     except Exception:
-        pass
+        logger.debug("VRAM detection failed, assuming 0", exc_info=True)
     return 0.0

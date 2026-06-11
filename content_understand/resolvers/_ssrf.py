@@ -9,6 +9,7 @@ at a configurable byte limit.
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 from typing import Any
 from urllib.parse import urlparse
@@ -69,6 +70,11 @@ def _safe_connect(
 ) -> socket.socket:
     """Drop-in replacement for urllib3's create_connection that blocks private IPs."""
     host, port = address
+
+    # Allow localhost/loopback when CU_ALLOW_LOCALHOST is set (for local Ollama etc.)
+    if os.environ.get("CU_ALLOW_LOCALHOST") and host in ("127.0.0.1", "localhost", "::1"):
+        return _original_create_connection(address, timeout, source_address, socket_options)
+
     # Step 1: Resolve once
     try:
         addrinfos = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
@@ -108,6 +114,7 @@ def _safe_connect(
 
 # Monkey-patch urllib3 so every connection through requests goes through our check.
 # This is done at module import time so it is always active.
+_original_create_connection = urllib3.util.connection.create_connection
 urllib3.util.connection.create_connection = _safe_connect  # type: ignore[attr-defined]
 
 

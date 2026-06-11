@@ -356,7 +356,7 @@ def _apply_local_modality_models(local_bc: BackendConfig, rt) -> None:
                 for m in r.json().get("data", []):
                     installed_models.add(m.get("id", ""))
         except Exception:
-            pass
+            logger.debug("Failed to fetch installed models from local server", exc_info=True)
 
     for modality, attr in (
         ("video", "model"),

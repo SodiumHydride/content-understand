@@ -24,18 +24,29 @@ def generate_answer(
         bc = config.backends.get("local_server")
         
     if not bc:
-        return "Error: No active LLM provider configured."
+        raise RuntimeError("No active LLM provider configured. Please configure a backend in Settings.")
 
     # 2. Build the system and user prompts
     system_prompt = (
-        "You are an advanced AI personal knowledge assistant. Answer the user's question based on the provided notes from their personal knowledge base.\n"
-        "If the notes don't contain enough information to answer, use your general knowledge but clearly state what is from the notes and what is general knowledge.\n"
-        "IMPORTANT: When referencing information from a note, cite it inline using wikilinks e.g. [[Note Title]]. Keep the citation format exactly like [[Note Title]] and do not use markdown links for them.\n"
-        "Be concise, clear, and structure your answer with markdown headings, bullet points, and code blocks where appropriate."
+        "You are a personal knowledge assistant with access to the user's note vault.\n\n"
+        "Rules:\n"
+        "1. Answer based on the provided notes. If the notes lack sufficient info, say so clearly.\n"
+        "2. Cite notes using [[wikilinks]] — e.g., [[Note Title]]. Never use markdown links for citations.\n"
+        "3. Structure answers with markdown: headings, bullet points, code blocks as appropriate.\n"
+        "4. Be concise. Prefer bullet points over paragraphs.\n"
+        "5. If multiple notes cover the same topic, synthesize rather than repeating.\n"
+        "6. For factual claims, indicate whether they come from notes or general knowledge."
     )
     
     user_prompt = f"Context from notes:\n{context}\n\nQuestion: {question}"
-    
+
+    # Safety: truncate context if extremely long, preserving the question
+    if len(user_prompt) > 100_000:
+        context_part = f"Context from notes:\n{context}"
+        question_part = f"\n\nQuestion: {question}"
+        max_context = 100_000 - len(question_part)
+        user_prompt = context_part[:max_context] + "\n\n[Context truncated...]" + question_part
+
     # Try calling the API
     try:
         api_key = bc.api_keys[0] if bc.api_keys else "local"
@@ -114,5 +125,5 @@ def generate_answer(
             return res["choices"][0]["message"]["content"]
             
     except Exception as e:
-        logger.error(f"LLM generation failed for provider {provider_id} ({bc.type}): {e}")
-        return f"Error: Failed to generate response from model backend. Details: {e}"
+        logger.error("LLM generation failed for provider %s (%s): %s", provider_id, bc.type, e, exc_info=True)
+        raise RuntimeError(f"LLM generation failed: {e}") from e

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import atexit
 import json
 import logging
@@ -52,7 +53,7 @@ def _inject_bundled_ffmpeg():
             os.environ["PATH"] = ffmpeg_bin_dir + os.pathsep + os.environ.get("PATH", "")
             logger.info("Injected bundled ffmpeg: %s", ffmpeg_bin_dir)
     except Exception:
-        pass
+        logger.warning("Failed to inject bundled ffmpeg; will rely on system PATH", exc_info=True)
 
 
 def _apply_proxy_env(proxy_settings: dict[str, Any]) -> None:
@@ -90,7 +91,7 @@ try:
     from fastapi import FastAPI, HTTPException
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import PlainTextResponse
-    from pydantic import BaseModel
+    from pydantic import BaseModel, Field
     from sse_starlette.sse import EventSourceResponse
 except ImportError:
     print("Install sidecar deps: pip install fastapi uvicorn pydantic requests", file=sys.stderr)
@@ -244,7 +245,8 @@ async def _log_5xx_errors(request, call_next):
 
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
-_ingest_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ingest")
+_ingest_max_workers = int(os.environ.get("CU_MAX_INGEST_WORKERS", "3"))
+_ingest_pool = ThreadPoolExecutor(max_workers=_ingest_max_workers, thread_name_prefix="ingest")
 _shutdown_event = threading.Event()
 _engine_config: dict[str, Any] = {}
 
@@ -370,7 +372,7 @@ def _run_ingest(
 
             cleanup_stale_cache(Path(cfg.cache_dir), cfg.cache_max_age_seconds)
         except Exception:
-            pass
+            logger.debug("Stale cache cleanup failed (non-critical)", exc_info=True)
 
         with _jobs_lock:
             _jobs[job_id].update(
@@ -471,13 +473,13 @@ async def shutdown_endpoint():
         try:
             get_runtime_manager().shutdown()
         except Exception:
-            pass
+            logger.warning("Runtime manager shutdown failed during signal handler", exc_info=True)
         try:
             from engine.index.db import close_db
 
             close_db()
         except Exception:
-            pass
+            logger.warning("Database close failed during signal handler", exc_info=True)
         try:
             from sidecar.progress_bus import _queues
 
@@ -516,6 +518,33 @@ def set_config(body: ConfigPayload):
     # Propagate Ollama registry mirror to runtime manager
     get_runtime_manager().set_ollama_mirror(proxy.get("ollamaMirror", ""))
     return {"ok": True}
+
+
+class IngestConfigPayload(BaseModel):
+    max_workers: int = Field(ge=1, le=16)
+
+
+@app.get("/v1/config/ingest")
+def get_ingest_config():
+    return {
+        "max_workers": _ingest_max_workers,
+        "active_jobs": sum(1 for j in _jobs.values() if j.get("status") == "processing"),
+    }
+
+
+@app.put("/v1/config/ingest")
+def update_ingest_config(body: IngestConfigPayload):
+    global _ingest_pool, _ingest_max_workers
+    old_workers = _ingest_max_workers
+    if body.max_workers == old_workers:
+        return {"max_workers": old_workers, "changed": False}
+    try:
+        _ingest_pool.shutdown(wait=False)
+    except Exception:
+        logger.warning("Failed to shut down old ingest pool", exc_info=True)
+    _ingest_max_workers = body.max_workers
+    _ingest_pool = ThreadPoolExecutor(max_workers=body.max_workers, thread_name_prefix="ingest")
+    return {"max_workers": body.max_workers, "changed": True}
 
 
 @app.get("/v1/runtime/status")
@@ -937,8 +966,10 @@ async def ollama_pull_stream():
                 if item is None:
                     break
                 yield item
+        except (GeneratorExit, asyncio.CancelledError):
+            pass  # client disconnected
         except Exception:
-            pass
+            logger.exception("SSE stream error (ollama pull)")
 
     return EventSourceResponse(event_generator(), ping=15)
 
@@ -1480,8 +1511,10 @@ async def job_stream(job_id: str):
                 if item is None:
                     break
                 yield item
+        except (GeneratorExit, asyncio.CancelledError):
+            pass  # client disconnected
         except Exception:
-            pass
+            logger.exception("SSE stream error (job %s)", job_id)
 
     return EventSourceResponse(event_generator(), ping=15)
 
@@ -1514,6 +1547,21 @@ def get_logs(limit: int = 100, level: str | None = None, job_id: str | None = No
 def index_rebuild():
     n = rebuild_from_vault(vault_path())
     return {"rebuilt": n}
+
+
+@app.get("/v1/plugins")
+def list_plugins():
+    from engine.plugins.manager import get_plugin_manager
+    pm = get_plugin_manager()
+    return {"plugins": pm.list_plugins()}
+
+
+@app.post("/v1/plugins/reload")
+def reload_plugins():
+    from engine.plugins.manager import get_plugin_manager
+    pm = get_plugin_manager()
+    pm.reload()
+    return {"reloaded": True, "count": len(pm.plugins)}
 
 
 class CanvasAssetPayload(BaseModel):
