@@ -60,7 +60,11 @@ function resolveHealth(catalog: OllamaCatalog | null): string | undefined {
   const op = catalog?.operation
   if (!catalog?.running) return undefined
   if (op?.state === 'error') return 'error'
-  return op?.ollama_health ?? 'healthy'
+  const h = op?.ollama_health
+  // 'unknown' means the health check hasn't run yet — treat as healthy
+  // since the catalog endpoint successfully reached Ollama
+  if (!h || h === 'unknown') return 'healthy'
+  return h
 }
 
 // ── Component ────────────────────────────────────────────────────
